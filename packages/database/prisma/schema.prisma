@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER_ADMIN
+  CUSTOMER_MEMBER
+  PROVIDER_ADMIN
+  PROVIDER_DRIVER
+  DISPATCHER
+  COMPLIANCE
+  ADMIN
+}
+
+enum JobType {
+  FAILED_DELIVERY
+  BULKY_RETURN
+  COMPANY_SURPLUS
+}
+
+enum JobStatus {
+  DRAFT
+  TRIAGED
+  QUOTED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum Urgency {
+  SCHEDULED
+  SAME_DAY
+  URGENT
+}
+
+enum ProviderStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  REJECTED
+}
+
+model User {
+  id             String        @id @default(uuid())
+  email          String        @unique
+  name           String
+  role           UserRole
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  vatId     String?
+  users     User[]
+  jobs      Job[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Provider {
+  id              String             @id @default(uuid())
+  legalName       String
+  status          ProviderStatus     @default(PENDING)
+  serviceRadiusKm Int                @default(30)
+  vehicles        Vehicle[]
+  documents       ProviderDocument[]
+  assignments     Assignment[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model Vehicle {
+  id               String   @id @default(uuid())
+  providerId       String
+  provider         Provider @relation(fields: [providerId], references: [id])
+  registrationHash String
+  class            String
+  payloadKg        Int
+  volumeM3         Decimal  @db.Decimal(6, 2)
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+}
+
+model ProviderDocument {
+  id         String         @id @default(uuid())
+  providerId String
+  provider   Provider       @relation(fields: [providerId], references: [id])
+  type       String
+  status     DocumentStatus @default(PENDING)
+  storageKey String
+  expiresAt  DateTime?
+  reviewedAt DateTime?
+  createdAt  DateTime       @default(now())
+}
+
+model Job {
+  id                String       @id @default(uuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  type              JobType
+  status            JobStatus    @default(DRAFT)
+  urgency           Urgency
+  pickup            Json
+  destination       Json?
+  items             Json
+  stairs            Int          @default(0)
+  liftAvailable     Boolean      @default(false)
+  requestedAt       DateTime?
+  customerReference String?
+  notes             String?
+  quoteNetCents     Int?
+  assignments       Assignment[]
+  events            JobEvent[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([status, urgency])
+}
+
+model Assignment {
+  id             String    @id @default(uuid())
+  jobId          String
+  job            Job       @relation(fields: [jobId], references: [id])
+  providerId     String
+  provider       Provider  @relation(fields: [providerId], references: [id])
+  status         String
+  payoutNetCents Int
+  acceptedAt     DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([jobId, status])
+}
+
+model JobEvent {
+  id        String   @id @default(uuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id])
+  actorId   String?
+  type      String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+}

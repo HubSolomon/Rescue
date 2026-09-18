@@ -1,0 +1,21 @@
+{
+  "name": "rescue-circular-logistics",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @rescue/api --filter @rescue/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm --filter @rescue/contracts build && pnpm --filter @rescue/database build && pnpm --filter @rescue/api typecheck && pnpm --filter @rescue/web typecheck",
+    "test": "pnpm -r test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:generate": "pnpm --filter @rescue/database generate",
+    "db:migrate": "pnpm --filter @rescue/database migrate",
+    "db:studio": "pnpm --filter @rescue/database studio"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
+  }
+}
