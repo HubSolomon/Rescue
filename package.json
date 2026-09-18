@@ -4,12 +4,13 @@
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "scripts": {
-    "dev": "pnpm --parallel --filter @rescue/api --filter @rescue/web dev",
+    "build:packages": "pnpm --filter @rescue/contracts build && pnpm --filter @rescue/database build",
+    "dev": "pnpm build:packages && pnpm --parallel --filter @rescue/api --filter @rescue/web dev",
     "build": "pnpm -r build",
-    "lint": "pnpm -r lint",
-    "typecheck": "pnpm --filter @rescue/contracts build && pnpm --filter @rescue/database build && pnpm --filter @rescue/api typecheck && pnpm --filter @rescue/web typecheck",
-    "test": "pnpm -r test",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "lint": "pnpm build:packages && pnpm -r lint",
+    "typecheck": "pnpm build:packages && pnpm --filter @rescue/api typecheck && pnpm --filter @rescue/web typecheck",
+    "test": "pnpm build:packages && pnpm -r test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",
     "db:studio": "pnpm --filter @rescue/database studio"
