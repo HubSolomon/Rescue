@@ -44,9 +44,10 @@ export function generateStaticParams() {
 
 /** Colour tokens, with the reason each one exists. */
 const COLOURS = [
-  { token: "--navy", value: "#102a43", use: "Headings, brand, primary structure" },
-  { token: "--green", value: "#18a06a", use: "Primary action, success, the mark" },
-  { token: "--amber", value: "#f2a93b", use: "Attention that is not yet failure" },
+  { token: "--navy", value: "#0d2b44", use: "Headings, structure, the wordmark" },
+  { token: "--green", value: "#0d9b67", use: "The mark and decorative shapes. Never text" },
+  { token: "--green-strong", value: "#0b8458", use: "Buttons and green text. 4.7:1 with white" },
+  { token: "--amber", value: "#f6a641", use: "Attention that is not yet failure" },
   { token: "--ink", value: "#1d2733", use: "Body text" },
   { token: "--muted", value: "#607080", use: "Secondary text, metadata" },
   { token: "--pale", value: "#f4f7f9", use: "Console background behind panels" },
@@ -93,13 +94,75 @@ export default async function StyleguidePage({
           eyebrow="Design system"
           title="RESCUE"
           lead="Rendered from the product's own stylesheet and components, so it cannot drift from what ships."
-          actions={<LinkButton href={`/${locale}`}>{messages.common.back}</LinkButton>}
+          actions={
+            <LinkButton href={`/${locale}`} variant="ghost">
+              {messages.common.back}
+            </LinkButton>
+          }
         />
+
+        <Panel title="Logo">
+          <p className="muted">
+            The lockup is the primary form. The mark stands alone only where the name is already
+            present — the favicon, a van door, an avatar. Neither is ever redrawn, recoloured or
+            set on a ground that swallows the navy.
+          </p>
+          <div className="stack" style={{ marginTop: 18 }}>
+            <div className="logo-plate">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="logo-lockup" src="/brand/rescue-logo.png" alt="RESCUE lockup" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="logo-mark" src="/brand/rescue-mark.png" alt="RESCUE mark" />
+            </div>
+            <div className="logo-plate on-navy">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="logo-mark" src="/brand/rescue-mark.png" alt="RESCUE mark on navy" />
+              <p className="small" style={{ color: "#fff", margin: 0, maxWidth: 420 }}>
+                On navy the mark holds, because its own navy leg is carried by the green bowl
+                either side of it. The full lockup does not — its wordmark is navy on navy — so on
+                a dark ground use the mark and set the name in type.
+              </p>
+            </div>
+          </div>
+          <DefinitionList
+            items={[
+              {
+                term: "Minimum height",
+                value:
+                  "40px for the lockup — below that its tagline stops being type — and 16px for the mark. The nav bar is 34px tall, so it carries the mark and sets the name in the interface face."
+              },
+              { term: "Clear space", value: "The height of the mark's arrow on every side" },
+              { term: "Never", value: "Stretched, rotated, outlined, or with the arrow recoloured" }
+            ]}
+          />
+        </Panel>
+
+        <Panel title="Fleet">
+          <p className="muted">
+            Two liveries, both current. Photograph the whole vehicle: a crop through the flank cuts
+            the lockup, and a cut lockup is not the lockup.
+          </p>
+          <div className="livery-pair" style={{ marginTop: 18 }}>
+            <figure className="livery">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/van-navy.jpg" alt={messages.landing.fleetNavyAlt} />
+              <figcaption>{messages.landing.fleetNavy}</figcaption>
+            </figure>
+            <figure className="livery">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/van-white.jpg" alt={messages.landing.fleetWhiteAlt} />
+              <figcaption>{messages.landing.fleetWhite}</figcaption>
+            </figure>
+          </div>
+        </Panel>
 
         <Panel title="Colour">
           <p className="muted">
-            Seven tokens. Green means an action succeeded or is the one to take; amber means
-            attention, not failure; red is reserved for errors and appears nowhere else.
+            Navy, green and amber are sampled from the logo artwork rather than chosen beside it.
+            Two greens, because the brand green carries only 3.6:1 against white: it fills the mark
+            and decorative shapes, and --green-strong — the same hue, darkened to 4.7:1 — carries
+            every button and every piece of green text. Amber means attention, not failure; red is
+            reserved for errors and appears nowhere else.
           </p>
           <ul className="swatches">
             {COLOURS.map((colour) => (
@@ -269,6 +332,7 @@ export default async function StyleguidePage({
             <li>Motion respects <code>prefers-reduced-motion</code>; the loading shimmer stops.</li>
             <li>German is the source of truth. English is typed against it and cannot fall behind.</li>
             <li>The navigation wraps on a phone. It is never hidden — a provider works one-handed.</li>
+            <li>The logo is a file, never a redrawing. Brand green fills; --green-strong carries text.</li>
           </ul>
         </Panel>
       </div>

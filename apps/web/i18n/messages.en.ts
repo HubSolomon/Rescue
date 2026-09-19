@@ -71,6 +71,16 @@ export const en: Messages = {
     returnBody: "Collect, document and route bulky returns to the retailer, warehouse or repair partner.",
     surplusTitle: "Surplus Recovery",
     surplusBody: "Relocate, reuse, donate, repair or responsibly route usable company equipment.",
+    fleetEyebrow: "Own and partner fleet",
+    fleetTitle: "A van people recognise.",
+    fleetBody:
+      "Every recovery arrives in RESCUE livery — the same brand at the loading bay as in the portal, so whoever opens the door knows who has turned up.",
+    fleetNavy: "Dark livery · standard",
+    fleetNavyAlt:
+      "Navy Mercedes Sprinter in RESCUE livery with a green sweep, outside a logistics hall in Bremen.",
+    fleetWhite: "Light livery · partner vehicles",
+    fleetWhiteAlt:
+      "White Mercedes Sprinter in RESCUE livery with a green sweep, outside the same logistics hall.",
     accountableEyebrow: "Accountable intelligence",
     accountableTitle: "AI recommends. Verified people decide and execute.",
     accountableBody:

@@ -100,13 +100,51 @@ download one. Only `UPLOADED` rows are downloadable; a requested-but-unfilled
 slot would hand out a link that looks like missing proof rather than absent
 proof.
 
-## 5. Testing
+## 5. Brand
+
+The supplied logo artwork replaced the mark that had been drawn in CSS, and it
+changed more than a picture.
+
+**The colour tokens now come from the artwork.** Navy, green and amber were
+sampled off the mark rather than chosen beside it — `#0d2b44`, `#0d9b67`,
+`#f6a641`, each within a few units of what the stylesheet already had, which is
+exactly why the mismatch would never have been noticed by eye and would have
+shown the moment the real lockup sat next to a heading. A unit test pins the
+three values to the artwork so they cannot drift apart again.
+
+**Sampling exposed a contrast failure that predated it.** White on the brand
+green is 3.6:1, and the old green was 3.4:1. The primary button is a 16px bold
+label, which is not large text, so it needed 4.5:1 and had never had it — the
+same for the eyebrow, which is green text on white. Rather than quietly darken
+the brand, the system now carries two greens: `--green` is the mark's own value
+and fills shapes only, and `--green-strong` (`#0b8458`, the same hue and
+saturation darkened to 4.7:1) carries every button and every piece of green
+text. The split is stated in the design system and enforced by a test that
+fails if `.button` ever takes the brand green again.
+
+**Every documented colour is now a token.** The audit turned up a gap between
+what the design system described — thirty-odd colours with usage notes — and
+what the stylesheet declared: eight custom properties, with the rest as literals
+inside rules. All of them are now on `:root`, so `tests/contrast.test.ts` can
+read the real values and check twenty-eight pairs on every run instead of
+trusting prose.
+
+**Assets.** `apps/web/public/brand/` holds the lockup, the mark, a 512px icon
+(also the app's favicon) and both van liveries. The nav carries the mark plus
+the name in the interface face rather than the lockup: at 34px the lockup's
+CIRCULAR LOGISTICS line is about three pixels tall and stops being type. The
+landing page gained a fleet section showing both liveries, and the styleguide
+gained Logo and Fleet panels with the usage rules. There is no SVG — the source
+artwork is raster, and tracing it would produce a mark that is nearly but not
+exactly this one.
+
+## 6. Testing
 
 | Layer | Count | Notes |
 | --- | --- | --- |
 | API unit and integration | 190 passing, 1 skipped | Skipped suite is `PrismaStore`, which needs a query engine binary |
-| Web component | 23 passing | Vitest + Testing Library |
-| End-to-end | 24 passing | 12 journeys × desktop Chromium and Pixel 7 |
+| Web component and tokens | 51 passing | Vitest + Testing Library, plus 28 contrast assertions read out of `globals.css` |
+| End-to-end | 26 passing | 13 journeys × desktop Chromium and Pixel 7 |
 
 The end-to-end suite runs the real API and the real web build together against
 the in-memory store and the development identity provider. Nothing is mocked:
@@ -122,7 +160,7 @@ HTML arriving and React hydrating, `openRow` retries — that is a real gap a
 person closes by clicking again, and the test does the same rather than
 pretending the first click always takes.
 
-## 6. Known limitations
+## 7. Known limitations
 
 - `PrismaStore` is still unexecuted. The container cannot reach
   `binaries.prisma.sh`, so the conformance suite that both adapters share has
@@ -139,3 +177,9 @@ pretending the first click always takes.
   — a date range, or hours of the day — is Phase 4 work alongside offer expiry.
 - The proof download returns a signed URL from the mock storage signer, which
   stores nothing. The redirect and the signature are real; the object is not.
+- The brand artwork is raster only. A vector mark would sharpen the favicon and
+  let the arrow be recoloured for a dark theme; both are blocked until someone
+  supplies or draws one.
+- No webfont. The stack starts with Inter and nothing loads it, so most viewers
+  see their system UI face — including the wordmark set in type beside the mark
+  in the nav, which is therefore not the lockup's own letterforms.

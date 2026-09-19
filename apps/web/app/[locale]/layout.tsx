@@ -39,9 +39,21 @@ export default async function LocaleLayout({
 
         <header className="nav">
           <div className="shell nav-inner">
+            {/* The mark, not the full lockup: at nav height the lockup's
+                "CIRCULAR LOGISTICS" line is about three pixels tall and stops
+                being type. The mark plus the name in the interface's own face
+                is the small-size form. */}
             <Link className="brand" href={`/${locale}`}>
-              <span className="mark" aria-hidden="true" />
-              <span>{messages.common.appName}</span>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                className="brand-mark"
+                src="/brand/rescue-mark.png"
+                alt=""
+                aria-hidden="true"
+                width={432}
+                height={535}
+              />
+              <span className="brand-name">{messages.common.appName}</span>
             </Link>
 
             <nav className="nav-links" aria-label={messages.nav.console}>

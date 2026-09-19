@@ -316,4 +316,25 @@ test.describe("the design system is part of the product", () => {
     await page.goto("/en/styleguide");
     await expect(page.getByText("Received").first()).toBeVisible();
   });
+
+  test("the logo artwork is served, not just referenced", async ({ page }) => {
+    // A missing image is silent: the alt text renders and the page looks
+    // merely plain. Each file is fetched so a broken path fails loudly.
+    for (const path of [
+      "/brand/rescue-logo.png",
+      "/brand/rescue-mark.png",
+      "/brand/van-navy.jpg",
+      "/brand/van-white.jpg"
+    ]) {
+      const response = await page.request.get(path);
+      expect(response.status(), path).toBe(200);
+      expect(Number(response.headers()["content-length"] ?? 1)).toBeGreaterThan(0);
+    }
+
+    await page.goto("/de/styleguide");
+    const mark = page.locator('img[src="/brand/rescue-mark.png"]').first();
+    await expect(mark).toBeVisible();
+    // naturalWidth is 0 when the browser could not decode the file.
+    expect(await mark.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(100);
+  });
 });

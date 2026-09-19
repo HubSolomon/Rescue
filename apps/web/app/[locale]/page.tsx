@@ -50,6 +50,38 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
         </div>
       </section>
 
+      <section className="section pale">
+        <div className="shell">
+          <p className="eyebrow">{messages.landing.fleetEyebrow}</p>
+          <h2>{messages.landing.fleetTitle}</h2>
+          <p className="lead">{messages.landing.fleetBody}</p>
+          {/* Both liveries, because a customer and a provider see different
+              vans arrive and both are RESCUE. */}
+          <div className="livery-pair" style={{ marginTop: 32 }}>
+            <figure className="livery">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/van-navy.jpg"
+                alt={messages.landing.fleetNavyAlt}
+                width={1200}
+                height={800}
+              />
+              <figcaption>{messages.landing.fleetNavy}</figcaption>
+            </figure>
+            <figure className="livery">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/van-white.jpg"
+                alt={messages.landing.fleetWhiteAlt}
+                width={1200}
+                height={800}
+              />
+              <figcaption>{messages.landing.fleetWhite}</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
       <section className="section">
         <div className="shell">
           <p className="eyebrow">{messages.landing.workflowsEyebrow}</p>

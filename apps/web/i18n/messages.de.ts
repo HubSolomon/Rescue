@@ -70,6 +70,16 @@ export const de = {
     returnBody: "Sperrgutretouren abholen, dokumentieren und an Handel, Lager oder Reparaturpartner leiten.",
     surplusTitle: "Bestands-Rückholung",
     surplusBody: "Nutzbare Betriebsausstattung umsetzen, wiederverwenden, spenden, reparieren oder verantwortungsvoll verwerten.",
+    fleetEyebrow: "Eigene und Partnerflotte",
+    fleetTitle: "Ein Fahrzeug, das man wiedererkennt.",
+    fleetBody:
+      "Jede Rückholung fährt in RESCUE-Lackierung vor — dieselbe Marke an der Rampe wie im Portal, damit Empfangende wissen, wer da kommt.",
+    fleetNavy: "Dunkle Lackierung · Standard",
+    fleetNavyAlt:
+      "Dunkelblauer Mercedes-Sprinter in RESCUE-Lackierung mit grünem Bogen, vor einer Logistikhalle in Bremen.",
+    fleetWhite: "Helle Lackierung · Partnerfahrzeuge",
+    fleetWhiteAlt:
+      "Weißer Mercedes-Sprinter in RESCUE-Lackierung mit grünem Bogen, vor derselben Logistikhalle.",
     accountableEyebrow: "Nachvollziehbare Intelligenz",
     accountableTitle: "Die KI schlägt vor. Geprüfte Menschen entscheiden.",
     accountableBody:
