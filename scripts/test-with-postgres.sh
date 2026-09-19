@@ -72,7 +72,7 @@ fi
 # The port the container publishes, so this keeps working if compose is edited.
 port="$(compose port "$COMPOSE_SERVICE" 5432 | sed 's/.*://')"
 export DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@localhost:$port/$SCRATCH_DB"
-echo "==> DATABASE_URL=$DATABASE_URL"
+echo "==> DATABASE_URL=postgresql://$DB_USER:***@localhost:$port/$SCRATCH_DB"
 
 echo "==> applying migrations"
 pnpm --filter @rescue/database exec prisma migrate deploy

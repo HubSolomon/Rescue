@@ -13,6 +13,7 @@
     "e2e:install": "pnpm --filter @rescue/web exec playwright install chromium chromium-headless-shell",
     "test:e2e": "pnpm --filter @rescue/web build && pnpm --filter @rescue/web test:e2e",
     "test:db": "bash scripts/test-with-postgres.sh",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",
