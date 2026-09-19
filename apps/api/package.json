@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --filter @rescue/contracts build && pnpm --filter @rescue/database build",
     "test": "vitest run"
   },
   "dependencies": {
