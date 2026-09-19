@@ -2,7 +2,12 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Working branches too, not only main. CI that runs solely on a pull
+    # request is CI that has not run yet -- the store conformance suite sat
+    # unexecuted for two phases waiting for a button to be pressed. The
+    # concurrency rule below means a branch pushed repeatedly still occupies
+    # one runner, so this costs a superseded run, not a queue.
+    branches: [main, "claude/**", "feat/**", "fix/**"]
 
 # Read-only by default. A job that needs more asks for it, and none do.
 permissions:
