@@ -1,4 +1,4 @@
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { runStoreConformance } from "./store-conformance.js";
 
 /**
@@ -17,6 +17,16 @@ import { runStoreConformance } from "./store-conformance.js";
  */
 
 const DATABASE_URL = process.env.DATABASE_URL;
+
+/**
+ * Tables that refuse TRUNCATE.
+ *
+ * A row-level BEFORE DELETE trigger does not fire on TRUNCATE -- there are no
+ * rows, only a file being replaced -- so these carry a statement-level guard
+ * as well. Migration 20260919000400 exists because a restore drill found the
+ * audit log could be emptied by one statement the system believed impossible.
+ */
+const APPEND_ONLY = ["JobEvent", "AuditLog", "LedgerEntry", "Suggestion"] as const;
 
 /** Every table the suite expects, so a partial schema is named, not inferred. */
 const REQUIRED_TABLES = [
@@ -116,6 +126,38 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
   const ERASEABLE = "55555555-5555-4555-8555-555555555555";
   const ERASEABLE_SUBJECT = "test|to-be-erased";
 
+  /**
+   * The guard that the drill found missing.
+   *
+   * Run against the same database the conformance suite uses, and separately
+   * from it, because it asserts a property of the schema rather than of the
+   * store. It re-enables what the fixture disables, so order does not matter.
+   */
+  describe("append-only survives the statement nobody thinks of", () => {
+    it("refuses TRUNCATE on every append-only table", async () => {
+      const { getDb } = await import("@rescue/database");
+      const db = getDb(DATABASE_URL);
+      for (const table of APPEND_ONLY) {
+        await db.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER "${table}_no_truncate"`);
+        await expect(db.$executeRawUnsafe(`TRUNCATE TABLE "${table}"`)).rejects.toThrow(
+          /append-only; TRUNCATE is not permitted/
+        );
+      }
+      await db.$disconnect();
+    });
+
+    it("refuses a TRUNCATE that reaches them by cascade", async () => {
+      const { getDb } = await import("@rescue/database");
+      const db = getDb(DATABASE_URL);
+      // Truncating Job would take its events, its ledger and its suggestions
+      // with it. The child's guard has to stop the parent's statement.
+      await expect(db.$executeRawUnsafe(`TRUNCATE TABLE "Job" CASCADE`)).rejects.toThrow(
+        /append-only; TRUNCATE is not permitted/
+      );
+      await db.$disconnect();
+    });
+  });
+
   runStoreConformance("PrismaStore", {
     async create() {
       const [{ getDb }, { PrismaStore }] = await Promise.all([
@@ -124,6 +166,20 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
       ]);
       const db = getDb(DATABASE_URL);
       await assertUsable(db);
+
+      /**
+       * The append-only tables refuse TRUNCATE, so this says out loud that it
+       * is disabling that guard -- which is what the trigger's own HINT asks
+       * for. It is narrowed to the four `_no_truncate` triggers, so the
+       * UPDATE and DELETE guards stay armed throughout the suite, and it is
+       * only reachable at all because `looksLikeTestDatabase` has already
+       * refused anything that is not a scratch database.
+       */
+      for (const table of APPEND_ONLY) {
+        await db.$executeRawUnsafe(
+          `ALTER TABLE "${table}" DISABLE TRIGGER "${table}_no_truncate"`
+        );
+      }
 
       // Every table, children first. CASCADE would reach the rest anyway, but
       // naming them means adding a table to the schema and forgetting it here
@@ -136,6 +192,12 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
                        "Membership", "Provider", "Organization", "User"
         RESTART IDENTITY CASCADE
       `);
+
+      for (const table of APPEND_ONLY) {
+        await db.$executeRawUnsafe(
+          `ALTER TABLE "${table}" ENABLE TRIGGER "${table}_no_truncate"`
+        );
+      }
 
       await db.organization.createMany({
         data: [

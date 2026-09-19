@@ -10,7 +10,8 @@ AI-assisted B2B exception logistics for failed bulky deliveries, returns and reu
 - `packages/database`: Prisma schema, migrations and client
 - `docs/ARCHITECTURE.md`: system architecture and trust boundaries
 - `docs/adr/`: architecture decision records
-- `docs/audits/`: security audits and phase reports
+- `docs/audits/`: security audits, phase reports and the data inventory
+- `docs/runbooks/`: backup and restore, incident response
 
 ## Local setup
 
@@ -94,6 +95,14 @@ PATH. If you would rather run your own server, the script prints the commands.
 The store conformance suite runs against both implementations, so the
 in-memory and PostgreSQL stores are held to identical behaviour.
 
+```bash
+pnpm scan:secrets
+```
+
+Scans the working tree for committed credentials. No dependencies, and it
+prints locations rather than matched text -- echoing a secret into CI output
+moves it somewhere with longer retention than the file it was found in.
+
 The browser journeys need a browser, and Playwright downloads its own rather
 than using the one on your machine. Once per checkout:
 
@@ -124,7 +133,13 @@ Enforced in code:
   dispatcher moves a job out of `DRAFT`.
 - A job reaches `ASSIGNED` only from `QUOTED` with a customer-approved quote.
 - Money is integer euro cents end to end, with database CHECK constraints.
-- `JobEvent` and `AuditLog` are append-only, enforced by database triggers.
+- `JobEvent` and `AuditLog` are append-only, enforced by database triggers --
+  including a statement-level guard against `TRUNCATE`, which row-level
+  triggers do not catch.
+- Logs are redacted at the logger: no address, contact or credential reaches
+  one. `apps/api/src/lib/redaction.ts` lists every path.
+- Retention runs daily and erasure severs a person from the records the law
+  requires RESCUE to keep. `docs/audits/DATA_INVENTORY.md`.
 
 ## GitHub
 
