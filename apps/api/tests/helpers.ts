@@ -89,11 +89,13 @@ export const VALID_JOB = {
   notes: "Gate code 4471."
 };
 
-/** Drives a job from creation to ASSIGNED, returning the ids involved. */
-export async function jobThroughToAssigned(h: Harness) {
+/**
+ * Drives a job to QUOTED with the quote approved: the state from which a
+ * dispatcher may offer it, and therefore the state eligibility is evaluated in.
+ */
+export async function jobThroughToQuoted(h: Harness) {
   const customer = await h.auth(SUBJECTS.customerAdmin);
   const dispatcher = await h.auth(SUBJECTS.dispatcher);
-  const provider = await h.auth(SUBJECTS.providerHansa);
 
   const created = await h.app.inject({
     method: "POST",
@@ -124,6 +126,15 @@ export async function jobThroughToAssigned(h: Harness) {
     headers: { ...customer, ...idem() },
     payload: { decision: "APPROVE" }
   });
+
+  return { jobId, quoteId };
+}
+
+/** Drives a job from creation to ASSIGNED, returning the ids involved. */
+export async function jobThroughToAssigned(h: Harness) {
+  const dispatcher = await h.auth(SUBJECTS.dispatcher);
+  const provider = await h.auth(SUBJECTS.providerHansa);
+  const { jobId, quoteId } = await jobThroughToQuoted(h);
 
   const offers = await h.app.inject({
     method: "POST",

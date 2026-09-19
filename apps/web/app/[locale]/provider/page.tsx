@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { AssignmentOffer, Job } from "@rescue/contracts";
+import type { AssignmentOffer, Job, Provider } from "@rescue/contracts";
 import { formatRelative, getMessages, isLocale, type Locale } from "../../../i18n/index";
 import { api, ApiError } from "../../../lib/api";
 import { PROVIDER_ROLES, requireRole } from "../../../lib/auth";
@@ -55,6 +55,10 @@ export default async function ProviderInboxPage({
 
   const offers = await safely(api.get<AssignmentOffer[]>("/v1/offers?status=PENDING"), []);
   const allJobs = await safely(api.get<Job[]>("/v1/jobs?limit=50"), []);
+  const provider = await safely<Provider | null>(
+    api.get<Provider>(`/v1/providers/${user.activeProviderId}`),
+    null
+  );
   const myJobs = allJobs.filter((job) => ["ASSIGNED", "IN_PROGRESS"].includes(job.status));
   const now = new Date();
 
@@ -62,6 +66,18 @@ export default async function ProviderInboxPage({
     <div className="layout">
       <div className="shell">
         <PageHeader title={messages.provider.inboxTitle} lead={messages.provider.inboxLead} />
+
+        {/* An empty inbox has two very different causes. Say which one it is
+            here rather than leaving the provider to wonder why it is quiet. */}
+        {provider && !provider.acceptingWork && (
+          <p className="callout">
+            <strong>{messages.provider.availabilityOff}</strong>{" "}
+            {messages.provider.availabilityLead}{" "}
+            <Link className="locale-toggle" href={`/${locale}/provider/fleet`}>
+              {messages.provider.availabilityResume}
+            </Link>
+          </p>
+        )}
 
         {offers.length === 0 ? (
           <EmptyState title={messages.provider.inboxEmpty} body="" />

@@ -22,6 +22,7 @@ import {
   respondToOfferSchema,
   reviewDocumentSchema,
   reviewProviderSchema,
+  setAvailabilitySchema,
   triageSuggestionSchema,
   vehicleSchema,
   whoAmISchema
@@ -45,6 +46,7 @@ const SCHEMAS = {
   Provider: providerSchema,
   CreateProvider: createProviderSchema,
   ReviewProvider: reviewProviderSchema,
+  SetAvailability: setAvailabilitySchema,
   Vehicle: vehicleSchema,
   CreateVehicle: createVehicleSchema,
   CreateProviderDocument: createProviderDocumentSchema,
@@ -365,6 +367,14 @@ export function buildOpenApiDocument(version: string): Record<string, unknown> {
           responses: { "200": jsonResponse("Evidence recorded"), ...ERRORS }
         }
       },
+      "/evidence/{evidenceId}/download": {
+        get: {
+          tags: ["evidence"],
+          summary: "Short-lived signed URL for one uploaded evidence object",
+          parameters: [idParam("evidenceId"), ...TENANT_HEADER_PARAMS],
+          responses: { "200": jsonResponse("Download ticket"), ...ERRORS }
+        }
+      },
       "/providers": {
         post: {
           tags: ["providers"],
@@ -392,6 +402,15 @@ export function buildOpenApiDocument(version: string): Record<string, unknown> {
           summary: "Compliance activates, suspends or rejects a provider",
           parameters: [idParam()],
           requestBody: jsonBody("ReviewProvider"),
+          responses: { "200": jsonResponse("Provider updated", "Provider"), ...ERRORS }
+        }
+      },
+      "/providers/{id}/availability": {
+        post: {
+          tags: ["providers"],
+          summary: "The provider pauses or resumes taking work. Distinct from /review.",
+          parameters: [idParam()],
+          requestBody: jsonBody("SetAvailability"),
           responses: { "200": jsonResponse("Provider updated", "Provider"), ...ERRORS }
         }
       },

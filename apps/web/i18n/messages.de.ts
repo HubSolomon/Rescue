@@ -202,7 +202,8 @@ export const de = {
       MISSING_REQUIRED_DOCUMENT: "Pflichtdokument fehlt",
       DOCUMENT_EXPIRED: "Dokument abgelaufen",
       DOCUMENT_NOT_VERIFIED: "Dokument nicht geprüft",
-      NO_SUITABLE_VEHICLE: "Kein passendes Fahrzeug"
+      NO_SUITABLE_VEHICLE: "Kein passendes Fahrzeug",
+      PROVIDER_NOT_ACCEPTING_WORK: "Partner nimmt derzeit keine Aufträge an"
     }
   },
   provider: {
@@ -267,7 +268,18 @@ export const de = {
     contactEmail: "Kontakt-E-Mail",
     onboardingSubmit: "Registrierung absenden",
     onboardingPending:
-      "Ihre Registrierung wird geprüft. Sie erhalten erst nach Freigabe Aufträge."
+      "Ihre Registrierung wird geprüft. Sie erhalten erst nach Freigabe Aufträge.",
+    availabilityTitle: "Auftragsannahme",
+    availabilityLead:
+      "Solange Sie pausiert sind, erhalten Sie keine neuen Angebote. Laufende Aufträge bleiben bestehen.",
+    availabilityOn: "Sie nehmen Aufträge an.",
+    availabilityOff: "Sie sind pausiert.",
+    availabilityPause: "Annahme pausieren",
+    availabilityResume: "Annahme fortsetzen",
+    availabilityNote: "Grund (für die Disposition sichtbar)",
+    availabilityNotePlaceholder: "z. B. Transporter in der Werkstatt",
+    availabilityPaused: "Annahme pausiert.",
+    availabilityResumed: "Annahme fortgesetzt."
   },
   errors: {
     UNAUTHENTICATED: "Bitte melden Sie sich erneut an.",

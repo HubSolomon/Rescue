@@ -155,6 +155,12 @@ model Provider {
   serviceTypes    JobType[]
   contactEmail    String
   vatId           String?
+  /// The provider's own switch, distinct from `status`. `status` is what
+  /// RESCUE decided about the company; this is what the company says about
+  /// today. Kept separate so a provider pausing for an afternoon does not look
+  /// like one we suspended, and can switch itself back on.
+  acceptingWork    Boolean           @default(true)
+  availabilityNote String?
   memberships     Membership[]
   vehicles        Vehicle[]
   documents       ProviderDocument[]

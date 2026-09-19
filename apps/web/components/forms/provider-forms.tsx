@@ -7,6 +7,7 @@ import {
   completeJobAction,
   createProviderAction,
   respondToOfferAction,
+  setAvailabilityAction,
   startJobAction,
   uploadEvidenceAction
 } from "../../lib/actions/provider";
@@ -290,6 +291,75 @@ export function AddDocumentForm({ locale, messages, providerId }: Base & { provi
       <SubmitButton pendingLabel={messages.common.loading}>
         {messages.provider.addDocument}
       </SubmitButton>
+    </form>
+  );
+}
+
+/**
+ * Availability switch.
+ *
+ * Two named buttons rather than a toggle: a toggle in a van, one-handed, is
+ * easy to flip by accident and gives no reading of what it will do. "Pause new
+ * offers" says what happens. Pausing asks for a reason because a dispatcher
+ * looking at a short eligible list deserves one; resuming does not, because
+ * there is nothing to explain.
+ */
+export function AvailabilityForm({
+  locale,
+  messages,
+  providerId,
+  acceptingWork,
+  availabilityNote
+}: Base & { providerId: string; acceptingWork: boolean; availabilityNote: string | null }) {
+  const [state, formAction] = useActionState<FormState, FormData>(setAvailabilityAction, {});
+
+  return (
+    <form action={formAction} className="form">
+      <input type="hidden" name="locale" value={locale} />
+      <input type="hidden" name="providerId" value={providerId} />
+
+      <p className={acceptingWork ? "availability on" : "availability off"}>
+        <span className="availability-dot" aria-hidden="true" />
+        {acceptingWork ? messages.provider.availabilityOn : messages.provider.availabilityOff}
+      </p>
+      {!acceptingWork && availabilityNote && <p className="muted small">{availabilityNote}</p>}
+      <p className="muted small">{messages.provider.availabilityLead}</p>
+
+      {acceptingWork && (
+        <label htmlFor="availability-note">
+          {messages.provider.availabilityNote} <span className="muted">({messages.common.optional})</span>
+          <input
+            id="availability-note"
+            name="note"
+            maxLength={200}
+            placeholder={messages.provider.availabilityNotePlaceholder}
+          />
+        </label>
+      )}
+
+      <FormError code={state.errorCode} messages={messages} />
+      {state.ok && (
+        <SuccessNote>
+          {acceptingWork ? messages.provider.availabilityPaused : messages.provider.availabilityResumed}
+        </SuccessNote>
+      )}
+
+      <div className="actions">
+        {acceptingWork ? (
+          <SubmitButton
+            name="acceptingWork"
+            value="false"
+            variant="secondary"
+            pendingLabel={messages.common.loading}
+          >
+            {messages.provider.availabilityPause}
+          </SubmitButton>
+        ) : (
+          <SubmitButton name="acceptingWork" value="true" pendingLabel={messages.common.loading}>
+            {messages.provider.availabilityResume}
+          </SubmitButton>
+        )}
+      </div>
     </form>
   );
 }

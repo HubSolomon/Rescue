@@ -156,9 +156,22 @@ export default async function CustomerJobPage({
               ) : (
                 <ul className="plain-list">
                   {uploaded.map((item) => (
-                    <li key={item.id}>
-                      {messages.provider.evidenceKinds[item.kind]} ·{" "}
-                      <span className="muted small">{formatDate(item.createdAt, locale)}</span>
+                    <li key={item.id} className="proof-row">
+                      <span>
+                        {messages.provider.evidenceKinds[item.kind]} ·{" "}
+                        <span className="muted small">{formatDate(item.createdAt, locale)}</span>
+                      </span>
+                      {/* Points at our own route, not at storage: the signed
+                          URL is minted server-side at click time and never
+                          appears in this page's payload. */}
+                      <a
+                        className="button ghost small-button"
+                        href={`/${locale}/proof/${item.id}`}
+                        rel="noopener"
+                        target="_blank"
+                      >
+                        {messages.customer.proofDownload}
+                      </a>
                     </li>
                   ))}
                 </ul>

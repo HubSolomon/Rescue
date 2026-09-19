@@ -327,6 +327,35 @@ export class PrismaStore implements Store {
     });
   }
 
+  async setProviderAvailability(params: {
+    providerId: string;
+    acceptingWork: boolean;
+    note: string | null;
+    actor: Actor;
+  }): Promise<StoredProvider> {
+    return this.db.$transaction(async (tx) => {
+      const existing = await tx.provider.findUnique({ where: { id: params.providerId } });
+      if (!existing) throw notFound("Provider");
+      // Resuming clears the note, matching the CHECK constraint the migration
+      // adds: a note may only exist while the provider is paused.
+      const availabilityNote = params.acceptingWork ? null : params.note;
+      const provider = await tx.provider.update({
+        where: { id: params.providerId },
+        data: { acceptingWork: params.acceptingWork, availabilityNote }
+      });
+      await tx.auditLog.create({
+        data: this.auditData(
+          params.actor,
+          "PROVIDER_AVAILABILITY_CHANGED",
+          "Provider",
+          provider.id,
+          { from: existing.acceptingWork, to: params.acceptingWork, note: availabilityNote }
+        )
+      });
+      return { ...provider, serviceTypes: provider.serviceTypes as string[] };
+    });
+  }
+
   async createVehicle(params: {
     providerId: string;
     input: Parameters<Store["createVehicle"]>[0]["input"];
@@ -897,6 +926,15 @@ export class PrismaStore implements Store {
     const job = await this.db.job.findFirst({ where: { id: jobId, ...scopeWhere(scope) } });
     if (!job) throw notFound("Job");
     return (await this.db.evidence.findMany({ where: { jobId } })) as StoredEvidence[];
+  }
+
+  async findEvidence(evidenceId: string, scope: Scope): Promise<StoredEvidence | null> {
+    // The scope is applied to the parent job in the same query, so a row in
+    // another tenant is simply not found.
+    const evidence = await this.db.evidence.findFirst({
+      where: { id: evidenceId, job: scopeWhere(scope) }
+    });
+    return (evidence as StoredEvidence | null) ?? null;
   }
 
   /* ---------------------------------------------------------- idempotency */

@@ -40,7 +40,12 @@ path to it.
 | --- | --- | --- |
 | Customer | `/customer`, `/customer/new`, `/customer/[id]` | Raise a recovery, watch its status, approve or reject the quote, cancel |
 | Dispatcher | `/dispatch`, `/dispatch/[id]` | Triage queue, approve the AI assessment, price the job, offer it to eligible partners with exclusion reasons |
-| Provider | `/provider`, `/provider/jobs/[id]`, `/provider/fleet`, `/provider/onboarding` | Offer inbox with expiry, start and complete work, upload proof, register the company and its vehicles and documents |
+| Provider | `/provider`, `/provider/jobs/[id]`, `/provider/fleet`, `/provider/onboarding` | Offer inbox with expiry, start and complete work, upload proof, set availability, register the company and its vehicles and documents |
+
+A fifth route, `/styleguide`, renders the design system from the product's own
+stylesheet and components — tokens, every component, and all four states at
+once. It is a route rather than a separate document so it cannot describe a
+product that has since changed.
 
 The AI assessment is advisory everywhere it appears and is labelled as such; the
 dispatcher's approval is the decision that moves the job.
@@ -68,13 +73,40 @@ only, so a provider's own assigned job 404'd. Added a `provider` scope to the
 store port, honoured by both adapters; quotes stay customer-only, because a
 provider knows its payout and the customer's price is not its business.
 
-## 4. Testing
+## 4. Two Phase 3 requirements closed afterwards
+
+**Provider availability.** The brief asks for it and nothing implemented it.
+Added as a field the provider owns — `acceptingWork` plus an optional note —
+kept deliberately separate from `status`, which is RESCUE's compliance decision
+and staff-only. Conflating them would mean a provider pausing for an afternoon
+looked identical to one we had suspended, and only an administrator could
+switch it back on. Dispatch reports the two as different exclusion reasons.
+Resuming clears the note, enforced by a CHECK constraint as well as by the
+form, so a stale "van in the workshop" cannot sit beside a provider who is
+taking work again. Migration `20260919000200_provider_availability`, verified
+against PostgreSQL 16: the default, the constraint in both directions, and the
+index.
+
+**Proof download.** The message key existed and nothing rendered it. The
+customer paid for the recovery and is entitled to the proof of it, so the read
+is scoped by the parent job rather than restricted to the provider that
+uploaded it — a customer reaches their own organisation's evidence, a provider
+the jobs it holds or held, staff everything, and anything outside that is
+reported absent rather than forbidden. The page links to a route handler in the
+web app, not to storage: the signed URL is minted server-side at click time, so
+it is fresh when used and never appears in the page's HTML. The HTTP method is
+part of the signed string, so an upload signature cannot be replayed as a
+download one. Only `UPLOADED` rows are downloadable; a requested-but-unfilled
+slot would hand out a link that looks like missing proof rather than absent
+proof.
+
+## 5. Testing
 
 | Layer | Count | Notes |
 | --- | --- | --- |
-| API unit and integration | 170 passing, 1 skipped | Skipped suite is `PrismaStore`, which needs a query engine binary |
+| API unit and integration | 190 passing, 1 skipped | Skipped suite is `PrismaStore`, which needs a query engine binary |
 | Web component | 23 passing | Vitest + Testing Library |
-| End-to-end | 20 passing | 10 journeys × desktop Chromium and Pixel 7 |
+| End-to-end | 24 passing | 12 journeys × desktop Chromium and Pixel 7 |
 
 The end-to-end suite runs the real API and the real web build together against
 the in-memory store and the development identity provider. Nothing is mocked:
@@ -90,7 +122,7 @@ HTML arriving and React hydrating, `openRow` retries — that is a real gap a
 person closes by clicking again, and the test does the same rather than
 pretending the first click always takes.
 
-## 5. Known limitations
+## 6. Known limitations
 
 - `PrismaStore` is still unexecuted. The container cannot reach
   `binaries.prisma.sh`, so the conformance suite that both adapters share has
@@ -103,3 +135,7 @@ pretending the first click always takes.
   `prefers-reduced-motion`, focus order — but has not been checked with a
   screen reader or an automated axe pass.
 - No client-side pagination beyond the API's cursor; lists request a fixed limit.
+- The provider console's availability is a single switch. Scheduled availability
+  — a date range, or hours of the day — is Phase 4 work alongside offer expiry.
+- The proof download returns a signed URL from the mock storage signer, which
+  stores nothing. The redirect and the signature are real; the object is not.

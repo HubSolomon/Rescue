@@ -223,3 +223,149 @@ describe("the upload ticket", () => {
     expect(list[0]!.storageKey).not.toMatch(/^https?:/);
   });
 });
+
+/**
+ * Proof download.
+ *
+ * The customer paid for the recovery and is entitled to see the proof of it,
+ * so the read is scoped by the parent job rather than restricted to the
+ * provider that uploaded it. These tests pin both halves: the customer can
+ * reach their own proof, and nobody reaches anyone else's.
+ */
+describe("proof is downloadable by everyone entitled to it, and nobody else", () => {
+  async function uploadedEvidence(h: Harness) {
+    const jobId = await assignedJob(h);
+    const provider = await h.auth(SUBJECTS.providerHansa);
+    const ticket = await h.app.inject({
+      method: "POST",
+      url: `/v1/jobs/${jobId}/evidence`,
+      headers: provider,
+      payload: {
+        kind: "DELIVERY_PHOTO",
+        mimeType: "image/png",
+        sizeBytes: 2048,
+        filename: "nachweis.png"
+      }
+    });
+    const evidenceId = ticket.json().data.evidenceId as string;
+    await h.app.inject({
+      method: "POST",
+      url: `/v1/evidence/${evidenceId}/complete`,
+      headers: provider
+    });
+    return { jobId, evidenceId };
+  }
+
+  it("gives the customer a short-lived signed URL", async () => {
+    const h = await boot();
+    const { evidenceId } = await uploadedEvidence(h);
+
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.customerAdmin)
+    });
+    expect(response.statusCode).toBe(200);
+    const data = response.json().data;
+    expect(data.downloadUrl).toMatch(/X-Signature=/);
+    expect(data.downloadUrl).toMatch(/X-Expires=/);
+    expect(new Date(data.expiresAt).getTime()).toBeGreaterThan(h.clock.now().getTime());
+  });
+
+  it("gives the provider that did the work the same URL shape", async () => {
+    const h = await boot();
+    const { evidenceId } = await uploadedEvidence(h);
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("refuses another customer, as absent rather than forbidden", async () => {
+    const h = await boot();
+    const { evidenceId } = await uploadedEvidence(h);
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.otherCustomer)
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("refuses a provider that never held the job", async () => {
+    const h = await boot();
+    const { evidenceId } = await uploadedEvidence(h);
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.providerRoland)
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("refuses anonymously", async () => {
+    const h = await boot();
+    const { evidenceId } = await uploadedEvidence(h);
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("will not hand out a URL for a slot nobody filled", async () => {
+    const h = await boot();
+    const jobId = await assignedJob(h);
+    const ticket = await h.app.inject({
+      method: "POST",
+      url: `/v1/jobs/${jobId}/evidence`,
+      headers: await h.auth(SUBJECTS.providerHansa),
+      payload: {
+        kind: "PICKUP_PHOTO",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        filename: "x.png"
+      }
+    });
+    // Requested, never confirmed: a link here would look like missing proof
+    // rather than absent proof.
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${ticket.json().data.evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.customerAdmin)
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("signs a download differently from an upload", async () => {
+    const h = await boot();
+    const { jobId, evidenceId } = await uploadedEvidence(h);
+
+    const upload = await h.app.inject({
+      method: "POST",
+      url: `/v1/jobs/${jobId}/evidence`,
+      headers: await h.auth(SUBJECTS.providerHansa),
+      payload: {
+        kind: "PICKUP_PHOTO",
+        mimeType: "image/png",
+        sizeBytes: 2048,
+        filename: "nachweis.png"
+      }
+    });
+    const download = await h.app.inject({
+      method: "GET",
+      url: `/v1/evidence/${evidenceId}/download`,
+      headers: await h.auth(SUBJECTS.customerAdmin)
+    });
+
+    const uploadSignature = new URL(upload.json().data.uploadUrl).searchParams.get("X-Signature");
+    const downloadSignature = new URL(download.json().data.downloadUrl).searchParams.get(
+      "X-Signature"
+    );
+    // The HTTP method is part of the signed string, so an upload signature
+    // cannot be replayed as a download one.
+    expect(uploadSignature).not.toBe(downloadSignature);
+  });
+});

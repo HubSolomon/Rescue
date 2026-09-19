@@ -68,6 +68,9 @@ export interface StoredProvider {
   id: string;
   legalName: string;
   status: ProviderStatus;
+  /** Set by the provider itself; `status` is set by RESCUE. */
+  acceptingWork: boolean;
+  availabilityNote: string | null;
   basePostalCode: string;
   serviceRadiusKm: number;
   serviceTypes: string[];
@@ -230,6 +233,13 @@ export interface Store {
     reason: string;
     actor: Actor;
   }): Promise<StoredProvider>;
+  /** The provider pausing or resuming itself. Audited like any other change. */
+  setProviderAvailability(params: {
+    providerId: string;
+    acceptingWork: boolean;
+    note: string | null;
+    actor: Actor;
+  }): Promise<StoredProvider>;
 
   createVehicle(params: {
     providerId: string;
@@ -320,6 +330,8 @@ export interface Store {
     actor: Actor;
   }): Promise<StoredEvidence>;
   listEvidence(jobId: string, scope: Scope): Promise<StoredEvidence[]>;
+  /** One evidence row, tenant-checked through the job it belongs to. */
+  findEvidence(evidenceId: string, scope: Scope): Promise<StoredEvidence | null>;
 
   /* ---------------------------------------------------------- idempotency */
   findIdempotencyRecord(organizationId: string, key: string): Promise<StoredIdempotencyRecord | null>;

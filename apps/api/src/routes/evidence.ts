@@ -99,4 +99,41 @@ export const evidenceRoutes =
       const evidence = await deps.store.listEvidence(id, auth.scope);
       return { data: evidence.map(publicEvidence) };
     });
+
+    /**
+     * A short-lived signed GET for one evidence object.
+     *
+     * The customer paid for the recovery and is entitled to the proof of it,
+     * so this is deliberately not provider-only. Authorisation is the scope on
+     * the parent job -- a customer reaches their own organisation's evidence, a
+     * provider reaches jobs it holds or held, staff reach everything -- and a
+     * row outside that scope is reported absent, never forbidden.
+     *
+     * Only UPLOADED rows are downloadable. A REQUESTED row is a slot nobody
+     * filled: handing out a URL for it would produce a broken link that looks
+     * like missing proof rather than absent proof.
+     */
+    app.get("/evidence/:evidenceId/download", async (request) => {
+      const auth = requireAuth(request);
+      const { evidenceId } = evidenceIdParams.parse(request.params);
+
+      const evidence = await deps.store.findEvidence(evidenceId, auth.scope);
+      if (!evidence) throw notFound("Evidence");
+      if (evidence.status !== "UPLOADED") throw notFound("Evidence");
+
+      const ticket = deps.storage.createDownloadTicket({
+        storageKey: evidence.storageKey,
+        now: deps.clock.now()
+      });
+
+      return {
+        data: {
+          evidenceId: evidence.id,
+          kind: evidence.kind,
+          mimeType: evidence.mimeType,
+          downloadUrl: ticket.downloadUrl,
+          expiresAt: ticket.expiresAt.toISOString()
+        }
+      };
+    });
   };

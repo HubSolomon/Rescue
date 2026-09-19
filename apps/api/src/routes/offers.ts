@@ -33,6 +33,7 @@ async function loadEligibilityProviders(store: Store): Promise<EligibilityProvid
     providers.map(async (provider) => ({
       id: provider.id,
       status: provider.status,
+      acceptingWork: provider.acceptingWork,
       basePostalCode: provider.basePostalCode,
       serviceRadiusKm: provider.serviceRadiusKm,
       serviceTypes: provider.serviceTypes as EligibilityProvider["serviceTypes"],

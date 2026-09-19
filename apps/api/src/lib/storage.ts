@@ -23,6 +23,11 @@ export interface UploadTicket {
   expiresAt: Date;
 }
 
+export interface DownloadTicket {
+  downloadUrl: string;
+  expiresAt: Date;
+}
+
 export interface EvidenceStorage {
   readonly kind: "mock" | "s3";
   createUploadTicket(params: {
@@ -33,6 +38,12 @@ export interface EvidenceStorage {
     filename: string;
     now: Date;
   }): UploadTicket;
+  /**
+   * A short-lived signed GET for an object the caller has already been
+   * authorised to read. The signer does not decide who may read; the route
+   * does, before it asks for a ticket.
+   */
+  createDownloadTicket(params: { storageKey: string; now: Date }): DownloadTicket;
 }
 
 const EXTENSION_BY_MIME: Record<EvidenceMimeType, string> = {
@@ -117,5 +128,20 @@ export class MockEvidenceStorage implements EvidenceStorage {
       maxBytes: params.sizeBytes,
       expiresAt
     };
+  }
+
+  createDownloadTicket(params: { storageKey: string; now: Date }): DownloadTicket {
+    const expiresAt = new Date(params.now.getTime() + this.ttlSeconds * 1000);
+    const expiresUnix = Math.floor(expiresAt.getTime() / 1000);
+    // The method is part of the signed string, so an upload signature cannot
+    // be replayed as a download one or the reverse.
+    const signature = createHmac("sha256", this.signingKey)
+      .update(`GET\n${this.bucket}\n${params.storageKey}\n${expiresUnix}`)
+      .digest("hex");
+
+    const url = new URL(`${this.endpoint.replace(/\/$/, "")}/${this.bucket}/${params.storageKey}`);
+    url.searchParams.set("X-Signature", signature);
+    url.searchParams.set("X-Expires", String(expiresUnix));
+    return { downloadUrl: url.toString(), expiresAt };
   }
 }

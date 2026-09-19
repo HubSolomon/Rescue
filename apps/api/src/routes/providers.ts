@@ -6,7 +6,8 @@ import {
   createVehicleSchema,
   providerStatusSchema,
   reviewDocumentSchema,
-  reviewProviderSchema
+  reviewProviderSchema,
+  setAvailabilitySchema
 } from "@rescue/contracts";
 import { forbidden, notFound } from "../lib/errors.js";
 import { registrationHash } from "../lib/crypto.js";
@@ -89,6 +90,31 @@ export const providerRoutes =
         providerId: id,
         status: input.status,
         reason: input.reason,
+        actor: auth.actor
+      });
+      return { data: publicProvider(provider) };
+    });
+
+    /**
+     * The provider pausing or resuming itself.
+     *
+     * Deliberately not `/review`: that is a compliance decision about the
+     * company and only staff may make it. This is the company saying the van
+     * is in the workshop, and only the provider (or staff acting for it) may
+     * make it. Dispatch reads both -- a paused provider is excluded with
+     * PROVIDER_NOT_ACCEPTING_WORK, which reads differently from
+     * PROVIDER_NOT_ACTIVE and is reversible without an administrator.
+     */
+    app.post("/providers/:id/availability", async (request) => {
+      const { id } = providerIdParams.parse(request.params);
+      const auth = assertProviderAccess(request, id);
+      requireRole(request, "PROVIDER_ADMIN", "DISPATCHER", "ADMIN");
+      const input = setAvailabilitySchema.parse(request.body);
+
+      const provider = await deps.store.setProviderAvailability({
+        providerId: id,
+        acceptingWork: input.acceptingWork,
+        note: input.note?.trim() ? input.note.trim() : null,
         actor: auth.actor
       });
       return { data: publicProvider(provider) };

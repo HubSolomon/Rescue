@@ -371,4 +371,53 @@ export function runStoreConformance(name: string, context: ConformanceContext): 
       await store.close();
     });
   });
+
+  describe(`${name}: provider availability`, () => {
+    it("pausing records the note and resuming clears it", async () => {
+      const { store, providerA, actor } = await context.create();
+
+      const paused = await store.setProviderAvailability({
+        providerId: providerA,
+        acceptingWork: false,
+        note: "Transporter in der Werkstatt",
+        actor
+      });
+      expect(paused.acceptingWork).toBe(false);
+      expect(paused.availabilityNote).toBe("Transporter in der Werkstatt");
+
+      // A stale reason must not linger beside a provider taking work again.
+      const resumed = await store.setProviderAvailability({
+        providerId: providerA,
+        acceptingWork: true,
+        note: "ignored",
+        actor
+      });
+      expect(resumed.acceptingWork).toBe(true);
+      expect(resumed.availabilityNote).toBeNull();
+
+      await store.close();
+    });
+
+    it("a provider starts out accepting work", async () => {
+      const { store, providerA } = await context.create();
+      const provider = await store.findProvider(providerA);
+      expect(provider?.acceptingWork).toBe(true);
+      expect(provider?.availabilityNote).toBeNull();
+      await store.close();
+    });
+
+    it("availability does not touch the vetting status", async () => {
+      const { store, providerA, actor } = await context.create();
+      const before = await store.findProvider(providerA);
+      await store.setProviderAvailability({
+        providerId: providerA,
+        acceptingWork: false,
+        note: null,
+        actor
+      });
+      const after = await store.findProvider(providerA);
+      expect(after?.status).toBe(before?.status);
+      await store.close();
+    });
+  });
 }

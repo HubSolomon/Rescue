@@ -49,6 +49,8 @@ export interface EligibilityDocument {
 export interface EligibilityProvider {
   id: string;
   status: ProviderStatus;
+  /** The provider's own switch. Vetted and active is not the same as free. */
+  acceptingWork: boolean;
   basePostalCode: string;
   serviceRadiusKm: number;
   serviceTypes: readonly JobType[];
@@ -158,6 +160,11 @@ export function evaluateProviderEligibility(
 
   if (provider.status !== "ACTIVE") {
     reasons.push("PROVIDER_NOT_ACTIVE");
+  }
+  // Reported separately from status so a dispatcher can tell "we suspended
+  // them" from "they are busy today", and so the provider can undo it.
+  if (!provider.acceptingWork) {
+    reasons.push("PROVIDER_NOT_ACCEPTING_WORK");
   }
   if (!provider.serviceTypes.includes(demand.jobType)) {
     reasons.push("SERVICE_TYPE_NOT_PERMITTED");

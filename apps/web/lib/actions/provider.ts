@@ -195,3 +195,33 @@ export async function addDocumentAction(
   revalidatePath(`/${locale}/provider/fleet`);
   return { ok: true };
 }
+
+/**
+ * The provider pausing or resuming itself.
+ *
+ * Distinct from the compliance review that sets `status`: this one the provider
+ * owns, and it is reversible without an administrator. The note only explains a
+ * pause, so resuming sends none — the API clears it either way.
+ */
+export async function setAvailabilityAction(
+  _previous: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const locale = resolveLocale(String(formData.get("locale") ?? ""));
+  const providerId = String(formData.get("providerId") ?? "");
+  const acceptingWork = String(formData.get("acceptingWork") ?? "") === "true";
+  const note = String(formData.get("note") ?? "").trim();
+
+  try {
+    await api.post(`/v1/providers/${providerId}/availability`, {
+      acceptingWork,
+      ...(!acceptingWork && note ? { note } : {})
+    });
+  } catch (error) {
+    return apiErrorState(error);
+  }
+
+  revalidatePath(`/${locale}/provider/fleet`);
+  revalidatePath(`/${locale}/provider`);
+  return { ok: true };
+}

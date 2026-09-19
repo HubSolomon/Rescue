@@ -59,7 +59,9 @@ export interface AuditRecord {
 export interface MemorySeed {
   organizations?: { id: string; name: string }[];
   users?: StoredUser[];
-  providers?: (Omit<StoredProvider, "createdAt" | "updatedAt"> & {
+  providers?: (Omit<StoredProvider, "createdAt" | "updatedAt" | "acceptingWork" | "availabilityNote"> & {
+    acceptingWork?: boolean;
+    availabilityNote?: string | null;
     vehicles?: (Omit<StoredVehicle, "providerId" | "createdAt" | "registrationHash"> & {
       registrationHash?: string;
     })[];
@@ -100,7 +102,13 @@ export class MemoryStore implements Store {
     }
     for (const provider of seed.providers ?? []) {
       const { vehicles = [], documents = [], ...rest } = provider;
-      this.providers.set(provider.id, { ...rest, createdAt: new Date(0), updatedAt: new Date(0) });
+      this.providers.set(provider.id, {
+        ...rest,
+        acceptingWork: rest.acceptingWork ?? true,
+        availabilityNote: rest.availabilityNote ?? null,
+        createdAt: new Date(0),
+        updatedAt: new Date(0)
+      });
       for (const vehicle of vehicles) {
         this.vehicles.set(vehicle.id, {
           ...vehicle,
@@ -298,6 +306,10 @@ export class MemoryStore implements Store {
       id: newId(),
       legalName: params.input.legalName,
       status: "PENDING",
+      // A new provider is willing by default; it is RESCUE's vetting, not the
+      // provider's own switch, that keeps it out of dispatch until approved.
+      acceptingWork: true,
+      availabilityNote: null,
       basePostalCode: params.input.basePostalCode,
       serviceRadiusKm: params.input.serviceRadiusKm,
       serviceTypes: [...params.input.serviceTypes],
@@ -338,6 +350,28 @@ export class MemoryStore implements Store {
       from,
       to: params.status,
       reason: params.reason
+    });
+    return provider;
+  }
+
+  async setProviderAvailability(params: {
+    providerId: string;
+    acceptingWork: boolean;
+    note: string | null;
+    actor: Actor;
+  }): Promise<StoredProvider> {
+    const provider = this.providers.get(params.providerId);
+    if (!provider) throw notFound("Provider");
+    const from = provider.acceptingWork;
+    provider.acceptingWork = params.acceptingWork;
+    // A note only explains a pause. Resuming clears it, so a stale "van in the
+    // workshop" cannot linger next to a provider that is taking work again.
+    provider.availabilityNote = params.acceptingWork ? null : params.note;
+    provider.updatedAt = new Date();
+    this.recordAudit(params.actor, "PROVIDER_AVAILABILITY_CHANGED", "Provider", provider.id, {
+      from,
+      to: params.acceptingWork,
+      note: provider.availabilityNote
     });
     return provider;
   }
@@ -766,6 +800,16 @@ export class MemoryStore implements Store {
   async listEvidence(jobId: string, scope: Scope): Promise<StoredEvidence[]> {
     this.requireJob(jobId, scope);
     return [...this.evidence.values()].filter((evidence) => evidence.jobId === jobId);
+  }
+
+  async findEvidence(evidenceId: string, scope: Scope): Promise<StoredEvidence | null> {
+    const evidence = this.evidence.get(evidenceId);
+    if (!evidence) return null;
+    // Reached through the job, so the tenant rule is the job's rule and there
+    // is no second place for it to drift.
+    const job = this.jobs.get(evidence.jobId);
+    if (!job || !this.visible(job, scope)) return null;
+    return evidence;
   }
 
   /* ---------------------------------------------------------- idempotency */

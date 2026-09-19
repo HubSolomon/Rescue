@@ -226,6 +226,29 @@ test.describe("the whole recovery, across three roles", () => {
     await page.goto("/de/customer");
     await openRow(page, reference, /\/de\/customer\/[0-9a-f-]{36}/);
     await expect(page.getByText("Abgeschlossen").first()).toBeVisible();
+
+    // 8. And can take the proof away. The link points at our own route, not at
+    // storage: the signed URL is minted server-side at click time, so it is
+    // never in this page's HTML.
+    const proof = page.getByRole("link", { name: /Nachweis öffnen/i }).first();
+    await expect(proof).toBeVisible();
+    const href = await proof.getAttribute("href");
+    expect(href).toMatch(/^\/de\/proof\/[0-9a-f-]{36}$/);
+    expect(await page.content()).not.toContain("X-Signature");
+
+    // Ask for the redirect without following it. The cookie is Secure, and
+    // Playwright's request context enforces that literally where a browser
+    // makes an exception for loopback, so it is passed explicitly rather than
+    // inherited -- the point of the assertion is the Location header.
+    const cookies = await page.context().cookies();
+    const session = cookies.find((cookie) => cookie.name === "rescue_session")!;
+    const redirect = await page.request.get(href!, {
+      maxRedirects: 0,
+      headers: { cookie: `rescue_session=${session.value}` }
+    });
+    expect(redirect.status()).toBe(307);
+    expect(redirect.headers()["location"]).toContain("X-Signature=");
+    expect(redirect.headers()["location"]).toContain("X-Expires=");
   });
 });
 
@@ -249,5 +272,48 @@ test.describe("tenant isolation is visible in the UI", () => {
     // 404, not 403: a 403 would confirm the job exists.
     await expect(page.getByText(/404|Nicht gefunden|not found/i).first()).toBeVisible();
     await expect(page.getByText(reference)).toHaveCount(0);
+  });
+});
+
+test.describe("a provider governs its own availability", () => {
+  test("pausing is visible to the provider and explains the quiet inbox", async ({ page }) => {
+    await signIn(page, ACCOUNTS.providerHansa);
+    await page.goto("/de/provider/fleet");
+
+    await expect(page.getByText("Sie nehmen Aufträge an.")).toBeVisible();
+    await page.getByLabel(/Grund/i).fill("Transporter in der Werkstatt");
+    await page.getByRole("button", { name: /Annahme pausieren/i }).click();
+
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByText("Sie sind pausiert.")).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
+    await expect(page.getByText("Transporter in der Werkstatt")).toBeVisible();
+
+    // An empty inbox has two very different causes; the banner says which.
+    await page.goto("/de/provider");
+    await expect(page.getByText(/Solange Sie pausiert sind/i)).toBeVisible();
+
+    // And it is the provider's own switch to undo, with no administrator.
+    await page.goto("/de/provider/fleet");
+    await page.getByRole("button", { name: /Annahme fortsetzen/i }).click();
+    await expect(async () => {
+      await page.reload();
+      await expect(page.getByText("Sie nehmen Aufträge an.")).toBeVisible({ timeout: 3000 });
+    }).toPass({ timeout: 20000 });
+    // Resuming clears the reason rather than leaving a stale one beside it.
+    await expect(page.getByText("Transporter in der Werkstatt")).toHaveCount(0);
+  });
+});
+
+test.describe("the design system is part of the product", () => {
+  test("renders in both locales from the real stylesheet", async ({ page }) => {
+    await page.goto("/de/styleguide");
+    await expect(page.getByRole("heading", { name: "Colour" })).toBeVisible();
+    await expect(page.getByText("Eingegangen").first()).toBeVisible();
+    await expect(page.getByText("Abgeschlossen").first()).toBeVisible();
+
+    await page.goto("/en/styleguide");
+    await expect(page.getByText("Received").first()).toBeVisible();
   });
 });

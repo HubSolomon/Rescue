@@ -26,6 +26,7 @@ function provider(overrides: Partial<EligibilityProvider> = {}): EligibilityProv
   return {
     id: "p-base",
     status: "ACTIVE",
+    acceptingWork: true,
     basePostalCode: "28195",
     serviceRadiusKm: 40,
     serviceTypes: ["FAILED_DELIVERY", "BULKY_RETURN"],
@@ -51,6 +52,23 @@ describe("every exclusion rule fires, and says why", () => {
       expect(result.eligible).toBe(false);
       expect(result.reasons).toContain("PROVIDER_NOT_ACTIVE");
     }
+  });
+
+  /**
+   * Vetting and availability are different facts and must stay separable: a
+   * dispatcher needs to tell "we suspended them" from "their van is in the
+   * workshop today", and only the second is the provider's to undo.
+   */
+  it("excludes a provider that has paused itself, with its own reason", () => {
+    const result = evaluateProviderEligibility(provider({ acceptingWork: false }), demand, NOW);
+    expect(result.eligible).toBe(false);
+    expect(result.reasons).toContain("PROVIDER_NOT_ACCEPTING_WORK");
+    expect(result.reasons).not.toContain("PROVIDER_NOT_ACTIVE");
+  });
+
+  it("an active provider accepting work is not excluded on either count", () => {
+    const result = evaluateProviderEligibility(provider(), demand, NOW);
+    expect(result.reasons).not.toContain("PROVIDER_NOT_ACCEPTING_WORK");
   });
 
   it("excludes a provider that does not offer the service type", () => {

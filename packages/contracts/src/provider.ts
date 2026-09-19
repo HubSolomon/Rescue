@@ -39,9 +39,27 @@ export const createProviderSchema = z.object({
 });
 export type CreateProviderInput = z.infer<typeof createProviderSchema>;
 
+/**
+ * Availability is the provider's own switch, distinct from `status`.
+ *
+ * `status` is what RESCUE decided about the company: vetted, suspended,
+ * rejected. `acceptingWork` is what the company says about today: the van is in
+ * the workshop, the driver is on holiday. Conflating the two would mean a
+ * provider going quiet for an afternoon looked identical to one we had
+ * suspended, and only an administrator could switch it back on.
+ */
+export const setAvailabilitySchema = z.object({
+  acceptingWork: z.boolean(),
+  /** Shown to dispatchers so a pause is explained rather than mysterious. */
+  note: z.string().max(200).optional()
+});
+export type SetAvailabilityInput = z.infer<typeof setAvailabilitySchema>;
+
 export const providerSchema = createProviderSchema.extend({
   id: uuid(),
   status: providerStatusSchema,
+  acceptingWork: z.boolean(),
+  availabilityNote: z.string().nullable(),
   createdAt: isoDateTime(),
   updatedAt: isoDateTime()
 });
@@ -108,6 +126,7 @@ export type ReviewDocumentInput = z.infer<typeof reviewDocumentSchema>;
  */
 export const ineligibilityReasons = [
   "PROVIDER_NOT_ACTIVE",
+  "PROVIDER_NOT_ACCEPTING_WORK",
   "SERVICE_TYPE_NOT_PERMITTED",
   "OUTSIDE_SERVICE_RADIUS",
   "MISSING_REQUIRED_DOCUMENT",

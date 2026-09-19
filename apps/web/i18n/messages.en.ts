@@ -203,7 +203,8 @@ export const en: Messages = {
       MISSING_REQUIRED_DOCUMENT: "Required document missing",
       DOCUMENT_EXPIRED: "Document expired",
       DOCUMENT_NOT_VERIFIED: "Document not verified",
-      NO_SUITABLE_VEHICLE: "No suitable vehicle"
+      NO_SUITABLE_VEHICLE: "No suitable vehicle",
+      PROVIDER_NOT_ACCEPTING_WORK: "Partner is not taking work right now"
     }
   },
   provider: {
@@ -268,7 +269,18 @@ export const en: Messages = {
     contactEmail: "Contact email",
     onboardingSubmit: "Submit registration",
     onboardingPending:
-      "Your registration is under review. You will not receive offers until it is approved."
+      "Your registration is under review. You will not receive offers until it is approved.",
+    availabilityTitle: "Taking work",
+    availabilityLead:
+      "While you are paused you receive no new offers. Jobs already under way are unaffected.",
+    availabilityOn: "You are taking work.",
+    availabilityOff: "You are paused.",
+    availabilityPause: "Pause new offers",
+    availabilityResume: "Start taking work again",
+    availabilityNote: "Reason (visible to dispatch)",
+    availabilityNotePlaceholder: "e.g. van in the workshop",
+    availabilityPaused: "Paused.",
+    availabilityResumed: "Taking work again."
   },
   errors: {
     UNAUTHENTICATED: "Please sign in again.",

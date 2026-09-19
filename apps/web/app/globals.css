@@ -179,3 +179,24 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #b4231
   .job-row-meta { flex-wrap: wrap; }
   .shell, .shell.narrow { width: calc(100% - 32px); }
 }
+
+/* ------------------------------------------------- provider availability */
+
+.availability { display: flex; align-items: center; gap: 9px; font-weight: 800; margin: 0; }
+.availability-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.availability.on { color: #087a50; }
+.availability.on .availability-dot { background: var(--green); }
+.availability.off { color: #92400e; }
+.availability.off .availability-dot { background: var(--amber); }
+
+.proof-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.small-button { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+
+/* -------------------------------------------------------------- styleguide */
+
+.swatches { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.swatch { display: flex; align-items: center; gap: 12px; }
+.swatch-chip { width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--line); flex: none; }
+.swatch code { font-size: 13px; font-weight: 800; color: var(--navy); }
+.swatch-use { display: block; }
+.specimen { margin: 0; }

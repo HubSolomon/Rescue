@@ -1,9 +1,13 @@
 import { notFound } from "next/navigation";
-import type { ProviderDocument, Vehicle } from "@rescue/contracts";
+import type { Provider, ProviderDocument, Vehicle } from "@rescue/contracts";
 import { formatDateOnly, getMessages, isLocale, type Locale } from "../../../../i18n/index";
 import { api, ApiError } from "../../../../lib/api";
 import { PROVIDER_ROLES, requireRole } from "../../../../lib/auth";
-import { AddDocumentForm, AddVehicleForm } from "../../../../components/forms/provider-forms";
+import {
+  AddDocumentForm,
+  AddVehicleForm,
+  AvailabilityForm
+} from "../../../../components/forms/provider-forms";
 import { EmptyState, LinkButton, PageHeader, Panel, Tag } from "../../../../components/ui";
 
 async function safely<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -41,7 +45,8 @@ export default async function FleetPage({ params }: { params: Promise<{ locale: 
     );
   }
 
-  const [vehicles, documents] = await Promise.all([
+  const [provider, vehicles, documents] = await Promise.all([
+    safely<Provider | null>(api.get<Provider>(`/v1/providers/${providerId}`), null),
     safely(api.get<Vehicle[]>(`/v1/providers/${providerId}/vehicles`), []),
     safely(api.get<ProviderDocument[]>(`/v1/providers/${providerId}/documents`), [])
   ]);
@@ -53,6 +58,18 @@ export default async function FleetPage({ params }: { params: Promise<{ locale: 
     <div className="layout">
       <div className="shell">
         <PageHeader title={messages.provider.fleetTitle} />
+
+        {provider && (
+          <Panel title={messages.provider.availabilityTitle}>
+            <AvailabilityForm
+              locale={locale}
+              messages={messages}
+              providerId={providerId}
+              acceptingWork={provider.acceptingWork}
+              availabilityNote={provider.availabilityNote}
+            />
+          </Panel>
+        )}
 
         <div className="two-col">
           <div className="stack">
