@@ -209,13 +209,16 @@ five were refused.
 
 ## 11. Known limitations
 
-- **`PrismaStore` is still unexecuted.** This is now the largest risk in the
-  codebase: the outbox, the ledger and the suggestion table all gained Prisma
-  implementations this phase, and the container cannot reach
-  `binaries.prisma.sh` to run the conformance suite against them. The
-  migrations are verified; the adapter code is not. Running
-  `DATABASE_URL=postgresql://localhost:5432/rescue_test pnpm --filter
-  @rescue/api test` on a machine with the Prisma engine would close it.
+- **`PrismaStore` is still unexecuted from this environment.** The outbox, the
+  ledger and the suggestion table all gained Prisma implementations this phase,
+  and the container cannot reach `binaries.prisma.sh` to run the conformance
+  suite against them. The migrations are verified; the adapter code is not.
+  `pnpm test:db` closes it on any machine with Docker — it starts the Postgres
+  in `docker-compose.yml`, creates a scratch database, migrates and runs the
+  suite, all inside the container.
+- **Postgres is pinned to 16** in `docker-compose.yml`, down from 17, because
+  16 is the version every migration here has actually been executed against.
+  Moving to 17 is a deployment decision with a re-verification attached.
 - **The maps adapter has not run against the live services from here** — this
   container's egress blocks both. Its request shape, parsing and failure
   handling are tested against a substituted transport, and a live check exists

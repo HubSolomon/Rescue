@@ -1,6 +1,10 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    # Pinned to 16 because 16 is the version every migration in this repository
+    # has actually been executed against, constraints and triggers included.
+    # Moving to 17 is a deployment decision with a re-verification attached,
+    # not a version bump.
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: rescue
       POSTGRES_PASSWORD: rescue

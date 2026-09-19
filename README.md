@@ -83,10 +83,13 @@ Runs typecheck, lint, tests and build. To also exercise the Prisma store
 against real PostgreSQL:
 
 ```bash
-createdb rescue_test
-DATABASE_URL=postgresql://localhost:5432/rescue_test pnpm db:deploy
-DATABASE_URL=postgresql://localhost:5432/rescue_test pnpm --filter @rescue/api test
+pnpm test:db
 ```
+
+That starts the Postgres in `docker-compose.yml`, creates a scratch database,
+applies the migrations and runs the suite — every step inside the container, so
+the host needs Docker and nothing else. No local PostgreSQL, no `psql` on the
+PATH. If you would rather run your own server, the script prints the commands.
 
 The store conformance suite runs against both implementations, so the
 in-memory and PostgreSQL stores are held to identical behaviour.
