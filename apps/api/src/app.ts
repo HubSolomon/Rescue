@@ -8,6 +8,13 @@ import { systemClock, type Clock } from "./lib/clock.js";
 import { AppError } from "./lib/errors.js";
 import { RulesFirstTriageService, type TriageService } from "./lib/triage.js";
 import { MockEvidenceStorage, type EvidenceStorage } from "./lib/storage.js";
+import { DispatchSweep, type SweepConfig } from "./lib/dispatch.js";
+import {
+  LoggingNotificationSender,
+  type NotificationSender
+} from "./lib/notifications.js";
+import { buildHandlers } from "./worker/handlers.js";
+import { OutboxWorker } from "./worker/worker.js";
 import {
   DevTokenIssuer,
   DevTokenVerifier,
@@ -28,13 +35,23 @@ import { MemoryStore } from "./store/memory.js";
 import { developmentSeed } from "./seed.js";
 import type { Store } from "./store/types.js";
 
-export const API_VERSION = "0.2.0";
+export const API_VERSION = "0.3.0";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    outbox: OutboxWorker;
+    sweep: DispatchSweep;
+    systemActor: { userId: string | null; role: "DISPATCHER"; correlationId: string };
+  }
+}
 
 export interface BuildAppOptions {
   config?: Config;
   store?: Store;
   triage?: TriageService;
   storage?: EvidenceStorage;
+  notifications?: NotificationSender;
+  sweep?: Partial<SweepConfig>;
   clock?: Clock;
   verifier?: TokenVerifier;
   rateLimitMax?: number;
@@ -93,6 +110,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
   // `parseConfig` refuses to allow in production.
   const store = options.store ?? (await createStore(config));
   const triage = options.triage ?? new RulesFirstTriageService();
+  const sweep = new DispatchSweep({ store, clock, config: options.sweep });
   const storage =
     options.storage ??
     new MockEvidenceStorage(
@@ -210,6 +228,34 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   /* ------------------------------------------------------------ assembly */
 
+  /**
+   * The actor recorded for anything the system does on its own.
+   *
+   * Deliberately not a person and deliberately not null: the audit log should
+   * be able to answer "who did this" with "the sweep did, at 02:14", rather
+   * than leaving a blank that reads like a missing record. It holds a
+   * dispatcher's role because that is the authority it acts with, and nothing
+   * it can do moves a job -- see tests/human-in-the-loop.test.ts.
+   */
+  const systemActor = { userId: null, role: "DISPATCHER" as const, correlationId: "system" };
+
+  const notifications = options.notifications ?? new LoggingNotificationSender(app.log);
+  const worker = new OutboxWorker({
+    store,
+    clock,
+    logger: app.log,
+    handlers: buildHandlers({ store, sender: notifications }),
+    actor: systemActor,
+    pollIntervalMs: config.OUTBOX_POLL_MS,
+    batchSize: config.OUTBOX_BATCH
+  });
+
+  // Exposed so the server can start it, and so a test can drain it by hand
+  // instead of waiting for a timer.
+  app.decorate("outbox", worker);
+  app.decorate("sweep", sweep);
+  app.decorate("systemActor", systemActor);
+
   const idempotency = createIdempotencyRunner(store, config.IDEMPOTENCY_TTL_HOURS);
   const devIssuer = config.devIdentityEnabled ? new DevTokenIssuer(config.JWT_SECRET) : null;
   const openApiDocument = buildOpenApiDocument(API_VERSION);
@@ -236,13 +282,14 @@ export async function buildApp(options: BuildAppOptions = {}) {
       await scoped.register(jobRoutes({ store, triage, idempotency }));
       await scoped.register(providerRoutes({ store, registrationHashKey: config.REGISTRATION_HASH_KEY }));
       await scoped.register(quoteRoutes({ store, idempotency, clock }));
-      await scoped.register(offerRoutes({ store, idempotency, clock }));
+      await scoped.register(offerRoutes({ store, idempotency, clock, sweep }));
       await scoped.register(evidenceRoutes({ store, storage, clock }));
     },
     { prefix: "/v1" }
   );
 
   app.addHook("onClose", async () => {
+    await worker.stop();
     await store.close();
   });
 

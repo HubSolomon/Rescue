@@ -1,5 +1,6 @@
 import { canTransition, type CreateJobInput, type Job, type JobStatus } from "@rescue/contracts";
 import { newId } from "../lib/crypto.js";
+import { outboxForEvent } from "../lib/outbox.js";
 import { AppError, conflict, invalidTransition, notFound } from "../lib/errors.js";
 import type {
   AcceptOfferResult,
@@ -11,9 +12,12 @@ import type {
   StoredEvidence,
   StoredIdempotencyRecord,
   StoredJobEvent,
+  StoredLedgerEntry,
   StoredOffer,
+  StoredOutboxMessage,
   StoredProvider,
   StoredQuote,
+  StoredSuggestion,
   StoredUser,
   StoredVehicle,
   Store,
@@ -81,6 +85,11 @@ export class MemoryStore implements Store {
   private readonly assignments = new Map<string, StoredAssignment>();
   private readonly evidence = new Map<string, StoredEvidence>();
   private readonly idempotency = new Map<string, StoredIdempotencyRecord>();
+  private readonly outbox = new Map<string, StoredOutboxMessage>();
+  /** dedupeKey -> id, so a second enqueue of the same intent is a no-op. */
+  private readonly outboxKeys = new Map<string, string>();
+  private readonly ledger: StoredLedgerEntry[] = [];
+  private readonly suggestions: StoredSuggestion[] = [];
 
   /** Append-only, like the database tables they mirror. Exposed for tests. */
   readonly events: StoredJobEvent[] = [];
@@ -203,6 +212,27 @@ export class MemoryStore implements Store {
       correlationId: actor.correlationId ?? null,
       createdAt: new Date()
     });
+
+    // The outbox is a projection of this stream, written here so it cannot be
+    // forgotten at a call site and cannot exist for an event that did not.
+    const draft = outboxForEvent({ jobId, type, payload });
+    if (draft && !this.outboxKeys.has(draft.dedupeKey)) {
+      const id = newId();
+      this.outboxKeys.set(draft.dedupeKey, id);
+      this.outbox.set(id, {
+        id,
+        topic: draft.topic,
+        dedupeKey: draft.dedupeKey,
+        jobId: draft.jobId,
+        payload: draft.payload,
+        status: "PENDING",
+        attempts: 0,
+        availableAt: new Date(0),
+        lastError: null,
+        createdAt: new Date(),
+        deliveredAt: null
+      });
+    }
   }
 
   /* ------------------------------------------------------------- identity */
@@ -696,20 +726,22 @@ export class MemoryStore implements Store {
     return offer;
   }
 
-  async expireOffers(now: Date, actor: Actor): Promise<number> {
+  async expireOffers(now: Date, actor: Actor): Promise<{ expired: number; jobIds: string[] }> {
     let expired = 0;
+    const jobIds = new Set<string>();
     for (const offer of this.offers.values()) {
       if (offer.status === "PENDING" && offer.expiresAt.getTime() <= now.getTime()) {
         offer.status = "EXPIRED";
         offer.respondedAt = now;
         expired++;
+        jobIds.add(offer.jobId);
         this.recordEvent(offer.jobId, actor, "OFFER_EXPIRED", { offerId: offer.id });
       }
     }
     if (expired > 0) {
       this.recordAudit(actor, "OFFERS_EXPIRED", "AssignmentOffer", "sweep", { count: expired });
     }
-    return expired;
+    return { expired, jobIds: [...jobIds] };
   }
 
   async findActiveAssignment(jobId: string): Promise<StoredAssignment | null> {
@@ -810,6 +842,153 @@ export class MemoryStore implements Store {
     const job = this.jobs.get(evidence.jobId);
     if (!job || !this.visible(job, scope)) return null;
     return evidence;
+  }
+
+  async recordJobEvent(params: {
+    jobId: string;
+    type: string;
+    payload?: Record<string, unknown>;
+    actor: Actor;
+  }): Promise<void> {
+    if (!this.jobs.has(params.jobId)) throw notFound("Job");
+    this.recordEvent(params.jobId, params.actor, params.type, params.payload ?? {});
+  }
+
+  /* --------------------------------------------------------------- outbox */
+
+  async claimOutbox(params: { now: Date; limit: number }): Promise<StoredOutboxMessage[]> {
+    const due = [...this.outbox.values()]
+      .filter(
+        (message) =>
+          (message.status === "PENDING" || message.status === "FAILED") &&
+          message.availableAt.getTime() <= params.now.getTime()
+      )
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, params.limit);
+
+    // Claiming pushes the row out of reach for a while, so a second poll
+    // before the first finishes does not hand the same message out twice.
+    // The Prisma store gets this from SKIP LOCKED; here it is explicit.
+    for (const message of due) {
+      message.availableAt = new Date(params.now.getTime() + 60_000);
+    }
+    return due.map((message) => ({ ...message }));
+  }
+
+  async markOutboxDelivered(params: { id: string; now: Date }): Promise<void> {
+    const message = this.outbox.get(params.id);
+    if (!message) return;
+    message.status = "SENT";
+    message.deliveredAt = params.now;
+    message.lastError = null;
+  }
+
+  async markOutboxFailed(params: {
+    id: string;
+    error: string;
+    now: Date;
+    retryAt: Date | null;
+  }): Promise<void> {
+    const message = this.outbox.get(params.id);
+    if (!message) return;
+    message.attempts += 1;
+    message.lastError = params.error.slice(0, 500);
+    // No retry time means we have stopped trying. The row stays, because a
+    // dead letter that deletes itself is a lost delivery nobody can find.
+    message.status = params.retryAt ? "FAILED" : "DEAD";
+    message.availableAt = params.retryAt ?? message.availableAt;
+  }
+
+  async listOutbox(params: {
+    jobId?: string;
+    status?: StoredOutboxMessage["status"];
+  }): Promise<StoredOutboxMessage[]> {
+    return [...this.outbox.values()]
+      .filter((message) => !params.jobId || message.jobId === params.jobId)
+      .filter((message) => !params.status || message.status === params.status)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((message) => ({ ...message }));
+  }
+
+  /* --------------------------------------------------------------- ledger */
+
+  async appendLedgerEntries(params: {
+    entries: {
+      jobId: string;
+      kind: StoredLedgerEntry["kind"];
+      amountCents: number;
+      externalReference?: string | null;
+      note?: string | null;
+    }[];
+    actor: Actor;
+  }): Promise<StoredLedgerEntry[]> {
+    const written: StoredLedgerEntry[] = [];
+    for (const entry of params.entries) {
+      // The same rules the database enforces, enforced here too, so the two
+      // stores refuse the same nonsense rather than one of them accepting it.
+      if (entry.amountCents === 0) throw new AppError(422, "VALIDATION_ERROR", "A ledger entry cannot be zero");
+      const mustBePositive = ["AUTHORISATION", "CAPTURE", "PAYOUT_REVERSAL"].includes(entry.kind);
+      if (mustBePositive !== entry.amountCents > 0) {
+        throw new AppError(
+          422,
+          "VALIDATION_ERROR",
+          `A ${entry.kind} entry must be ${mustBePositive ? "positive" : "negative"}`
+        );
+      }
+      const record: StoredLedgerEntry = {
+        id: newId(),
+        jobId: entry.jobId,
+        kind: entry.kind,
+        amountCents: entry.amountCents,
+        currency: "EUR",
+        externalReference: entry.externalReference ?? null,
+        note: entry.note ?? null,
+        createdAt: new Date()
+      };
+      this.ledger.push(record);
+      written.push(record);
+      this.recordAudit(params.actor, "LEDGER_ENTRY_APPENDED", "LedgerEntry", record.id, {
+        jobId: record.jobId,
+        kind: record.kind,
+        amountCents: record.amountCents
+      });
+    }
+    return written;
+  }
+
+  async listLedger(jobId: string, scope: Scope): Promise<StoredLedgerEntry[]> {
+    this.requireJob(jobId, scope);
+    return this.ledger.filter((entry) => entry.jobId === jobId).map((entry) => ({ ...entry }));
+  }
+
+  /* ---------------------------------------------------------- suggestions */
+
+  async recordSuggestion(params: {
+    jobId: string;
+    kind: string;
+    output: unknown;
+    provenance: StoredSuggestion extends never ? never : Parameters<Store["recordSuggestion"]>[0]["provenance"];
+  }): Promise<StoredSuggestion> {
+    const record: StoredSuggestion = {
+      id: newId(),
+      jobId: params.jobId,
+      kind: params.kind,
+      output: params.output,
+      promptId: params.provenance.promptId,
+      promptVersion: params.provenance.promptVersion,
+      model: params.provenance.model,
+      confidence: params.provenance.confidence,
+      latencyMs: params.provenance.latencyMs,
+      fellBackToRules: params.provenance.fellBackToRules,
+      createdAt: new Date()
+    };
+    this.suggestions.push(record);
+    return { ...record };
+  }
+
+  async listSuggestions(jobId: string, scope: Scope): Promise<StoredSuggestion[]> {
+    this.requireJob(jobId, scope);
+    return this.suggestions.filter((row) => row.jobId === jobId).map((row) => ({ ...row }));
   }
 
   /* ---------------------------------------------------------- idempotency */

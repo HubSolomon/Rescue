@@ -223,6 +223,9 @@ model Job {
   approvedCircularRoute String?
   quotes            Quote[]
   offers            AssignmentOffer[]
+  outbox            OutboxMessage[]
+  ledger            LedgerEntry[]
+  suggestions       Suggestion[]
   assignments       Assignment[]
   events            JobEvent[]
   evidence          Evidence[]
@@ -363,4 +366,92 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  DEAD
+}
+
+/// The transactional outbox.
+///
+/// A row is written in the SAME transaction as the state change it describes,
+/// so a job cannot move without the intent to tell someone being durable, and
+/// the intent cannot exist for a move that rolled back. A separate worker
+/// turns rows into effects. `dedupeKey` is unique: enqueueing the same intent
+/// twice collapses to one row, which is what keeps at-least-once delivery from
+/// becoming at-least-twice notification.
+model OutboxMessage {
+  id          String       @id @default(uuid())
+  topic       String
+  dedupeKey   String       @unique
+  jobId       String?
+  job         Job?         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  payload     Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now())
+  lastError   String?
+  createdAt   DateTime     @default(now())
+  deliveredAt DateTime?
+
+  /// The worker's claim query: due, not yet done, oldest first.
+  @@index([status, availableAt])
+  @@index([jobId, createdAt])
+}
+
+enum LedgerEntryKind {
+  AUTHORISATION
+  AUTHORISATION_VOID
+  CAPTURE
+  REFUND
+  PAYOUT
+  PAYOUT_REVERSAL
+}
+
+/// Append-only money movements, in integer euro cents.
+///
+/// Signed from RESCUE's point of view: money in is positive, money out is
+/// negative, so the sum of the column is always meaningful. There is no
+/// balance column anywhere -- a balance is a fold over these rows. A stored
+/// balance and its entries can disagree, and when they do neither can be
+/// trusted.
+model LedgerEntry {
+  id                String          @id @default(uuid())
+  jobId             String
+  job               Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  kind              LedgerEntryKind
+  amountCents       Int
+  currency          String          @default("EUR")
+  externalReference String?
+  note              String?
+  createdAt         DateTime        @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([kind, createdAt])
+}
+
+/// A model-produced suggestion, with the provenance to explain it later.
+///
+/// Recorded whether or not a dispatcher acts on it, and never consulted when
+/// deciding whether a transition is allowed: the job's own state machine does
+/// that. Kept so that "why did it suggest a box van" has an answer that names
+/// a prompt and a version rather than a vibe.
+model Suggestion {
+  id             String   @id @default(uuid())
+  jobId          String
+  job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  kind           String
+  output         Json
+  promptId       String
+  promptVersion  String
+  model          String
+  confidence     Float
+  latencyMs      Int
+  fellBackToRules Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([jobId, createdAt])
 }

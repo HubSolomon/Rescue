@@ -52,6 +52,16 @@ const baseSchema = z.object({
    */
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100_000).default(300),
 
+  /**
+   * Outbox worker. The poll interval trades delivery latency against database
+   * chatter; two seconds keeps a notification feeling immediate without the
+   * worker becoming the busiest client on the connection pool.
+   */
+  OUTBOX_POLL_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
+  OUTBOX_BATCH: z.coerce.number().int().min(1).max(500).default(20),
+  /** How often the dispatch sweep expires offers and re-covers uncovered jobs. */
+  SWEEP_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
+
   /** Keys the vehicle-registration hash. Registrations are never stored raw. */
   REGISTRATION_HASH_KEY: z.string().min(32).optional(),
 

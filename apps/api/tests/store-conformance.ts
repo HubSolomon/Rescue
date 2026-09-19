@@ -322,8 +322,15 @@ export function runStoreConformance(name: string, context: ConformanceContext): 
         actor: ctx.actor
       });
 
-      expect(await ctx.store.expireOffers(new Date(), ctx.actor)).toBe(1);
-      expect(await ctx.store.expireOffers(new Date(), ctx.actor)).toBe(0);
+      const first = await ctx.store.expireOffers(new Date(), ctx.actor);
+      expect(first.expired).toBe(1);
+      // The sweep also names the jobs it uncovered, so the caller does not
+      // have to re-derive them with a query that races the next sweep.
+      expect(first.jobIds).toHaveLength(1);
+
+      const second = await ctx.store.expireOffers(new Date(), ctx.actor);
+      expect(second.expired).toBe(0);
+      expect(second.jobIds).toEqual([]);
       await ctx.store.close();
     });
   });

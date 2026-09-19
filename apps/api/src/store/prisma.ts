@@ -1,6 +1,7 @@
 import { canTransition, type CreateJobInput, type Job, type JobStatus } from "@rescue/contracts";
 import type { Prisma, PrismaClient } from "@rescue/database";
 import { AppError, conflict, invalidTransition, notFound } from "../lib/errors.js";
+import { outboxForEvent } from "../lib/outbox.js";
 import type {
   AcceptOfferResult,
   Actor,
@@ -11,9 +12,12 @@ import type {
   StoredEvidence,
   StoredIdempotencyRecord,
   StoredJobEvent,
+  StoredLedgerEntry,
   StoredOffer,
+  StoredOutboxMessage,
   StoredProvider,
   StoredQuote,
+  StoredSuggestion,
   StoredUser,
   StoredVehicle,
   Store,
@@ -83,8 +87,43 @@ function quoteScopeWhere(scope: Scope): Prisma.QuoteWhereInput {
   return { id: "__never__" };
 }
 
+/** The client inside a `$transaction` callback: everything but the nested tx. */
+type Tx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+
 export class PrismaStore implements Store {
   constructor(private readonly db: PrismaClient) {}
+
+  /**
+   * Writes a job event and, in the SAME transaction, the outbox row it
+   * implies.
+   *
+   * Every transition goes through here rather than touching `jobEvent`
+   * directly, which is what makes "the job moved" and "somebody will be told"
+   * a single atomic fact. `skipDuplicates` leans on the unique dedupe key: a
+   * retried transaction re-enqueues the same intent and gets one row.
+   */
+  private async writeEvent(
+    tx: Tx,
+    jobId: string,
+    actor: Actor,
+    type: string,
+    payload: Record<string, unknown> = {}
+  ): Promise<void> {
+    await tx.jobEvent.create({ data: this.eventData(jobId, actor, type, payload) });
+    const draft = outboxForEvent({ jobId, type, payload });
+    if (!draft) return;
+    await tx.outboxMessage.createMany({
+      data: [
+        {
+          topic: draft.topic,
+          dedupeKey: draft.dedupeKey,
+          jobId: draft.jobId,
+          payload: draft.payload as Prisma.InputJsonValue
+        }
+      ],
+      skipDuplicates: true
+    });
+  }
 
   /* ---------------------------------------------------------------- utils */
 
@@ -166,9 +205,7 @@ export class PrismaStore implements Store {
           notes: params.input.notes ?? null
         }
       });
-      await tx.jobEvent.create({
-        data: this.eventData(job.id, params.actor, "JOB_CREATED", { type: params.input.type })
-      });
+      await this.writeEvent(tx, job.id, params.actor, "JOB_CREATED", { type: params.input.type });
       await tx.auditLog.create({
         data: this.auditData(params.actor, "JOB_CREATED", "Job", job.id, {
           organizationId: params.organizationId
@@ -232,7 +269,7 @@ export class PrismaStore implements Store {
         });
 
         const payload = { from: job.status, to: input.to, ...input.payload };
-        await tx.jobEvent.create({ data: this.eventData(job.id, input.actor, input.eventType, payload) });
+        await this.writeEvent(tx, job.id, input.actor, input.eventType, payload);
         await tx.auditLog.create({
           data: this.auditData(input.actor, input.eventType, "Job", job.id, payload)
         });
@@ -466,12 +503,10 @@ export class PrismaStore implements Store {
           validUntil: params.validUntil
         }
       });
-      await tx.jobEvent.create({
-        data: this.eventData(params.jobId, params.actor, "QUOTE_SENT", {
+      await this.writeEvent(tx, params.jobId, params.actor, "QUOTE_SENT", {
           quoteId: quote.id,
           grossCents: quote.grossCents
-        })
-      });
+        });
       await tx.auditLog.create({
         data: this.auditData(params.actor, "QUOTE_SENT", "Quote", quote.id, {
           jobId: params.jobId,
@@ -553,12 +588,10 @@ export class PrismaStore implements Store {
         });
         if (!job) throw notFound("Job");
 
-        await tx.jobEvent.create({
-          data: this.eventData(quote.jobId, params.actor, `QUOTE_${status}`, {
+        await this.writeEvent(tx, quote.jobId, params.actor, `QUOTE_${status}`, {
             quoteId: quote.id,
             reason: params.reason
-          })
-        });
+          });
         await tx.auditLog.create({
           data: this.auditData(params.actor, `QUOTE_${status}`, "Quote", quote.id, {
             jobId: quote.jobId,
@@ -602,12 +635,10 @@ export class PrismaStore implements Store {
           )
         );
       }
-      await tx.jobEvent.create({
-        data: this.eventData(params.jobId, params.actor, "OFFERS_SENT", {
+      await this.writeEvent(tx, params.jobId, params.actor, "OFFERS_SENT", {
           providerCount: created.length,
           payoutNetCents: params.payoutNetCents
-        })
-      });
+        });
       await tx.auditLog.create({
         data: this.auditData(params.actor, "OFFERS_SENT", "Job", params.jobId, {
           providerIds: created.map((offer) => offer.providerId)
@@ -738,9 +769,7 @@ export class PrismaStore implements Store {
             offerId: offer.id,
             providerId: offer.providerId
           };
-          await tx.jobEvent.create({
-            data: this.eventData(job.id, params.actor, "OFFER_ACCEPTED", payload)
-          });
+          await this.writeEvent(tx, job.id, params.actor, "OFFER_ACCEPTED", payload);
           await tx.auditLog.create({
             data: this.auditData(params.actor, "OFFER_ACCEPTED", "Assignment", assignment.id, {
               jobId: job.id,
@@ -782,12 +811,10 @@ export class PrismaStore implements Store {
         where: { id: offer.id },
         data: { status: "DECLINED", respondedAt: new Date(), declineReason: params.reason ?? null }
       });
-      await tx.jobEvent.create({
-        data: this.eventData(offer.jobId, params.actor, "OFFER_DECLINED", {
+      await this.writeEvent(tx, offer.jobId, params.actor, "OFFER_DECLINED", {
           offerId: offer.id,
           providerId: offer.providerId
-        })
-      });
+        });
       await tx.auditLog.create({
         data: this.auditData(params.actor, "OFFER_DECLINED", "AssignmentOffer", offer.id, {
           jobId: offer.jobId,
@@ -798,24 +825,27 @@ export class PrismaStore implements Store {
     });
   }
 
-  async expireOffers(now: Date, actor: Actor): Promise<number> {
+  async expireOffers(now: Date, actor: Actor): Promise<{ expired: number; jobIds: string[] }> {
     return this.db.$transaction(async (tx) => {
       const due = await tx.assignmentOffer.findMany({
         where: { status: "PENDING", expiresAt: { lte: now } }
       });
-      if (due.length === 0) return 0;
+      if (due.length === 0) return { expired: 0, jobIds: [] };
 
       await tx.assignmentOffer.updateMany({
         where: { id: { in: due.map((offer) => offer.id) } },
         data: { status: "EXPIRED", respondedAt: now }
       });
-      await tx.jobEvent.createMany({
-        data: due.map((offer) => this.eventData(offer.jobId, actor, "OFFER_EXPIRED", { offerId: offer.id }))
-      });
+      // One at a time rather than createMany, so each expiry also lands its
+      // outbox row inside this transaction. A sweep of a few dozen offers is
+      // not the hot path, and correctness is worth the round trips.
+      for (const offer of due) {
+        await this.writeEvent(tx, offer.jobId, actor, "OFFER_EXPIRED", { offerId: offer.id });
+      }
       await tx.auditLog.create({
         data: this.auditData(actor, "OFFERS_EXPIRED", "AssignmentOffer", "sweep", { count: due.length })
       });
-      return due.length;
+      return { expired: due.length, jobIds: [...new Set(due.map((offer) => offer.jobId))] };
     });
   }
 
@@ -850,9 +880,7 @@ export class PrismaStore implements Store {
           providerId: assignment.providerId,
           reason: params.reason
         };
-        await tx.jobEvent.create({
-          data: this.eventData(job.id, params.actor, "ASSIGNMENT_FELL_THROUGH", payload)
-        });
+        await this.writeEvent(tx, job.id, params.actor, "ASSIGNMENT_FELL_THROUGH", payload);
         await tx.auditLog.create({
           data: this.auditData(params.actor, "ASSIGNMENT_FELL_THROUGH", "Assignment", assignment.id, {
             jobId: job.id,
@@ -907,12 +935,10 @@ export class PrismaStore implements Store {
           uploadedByUserId: params.actor.userId
         }
       });
-      await tx.jobEvent.create({
-        data: this.eventData(evidence.jobId, params.actor, "EVIDENCE_UPLOADED", {
+      await this.writeEvent(tx, evidence.jobId, params.actor, "EVIDENCE_UPLOADED", {
           evidenceId: evidence.id,
           kind: evidence.kind
-        })
-      });
+        });
       await tx.auditLog.create({
         data: this.auditData(params.actor, "EVIDENCE_UPLOADED", "Evidence", evidence.id, {
           jobId: evidence.jobId
@@ -935,6 +961,194 @@ export class PrismaStore implements Store {
       where: { id: evidenceId, job: scopeWhere(scope) }
     });
     return (evidence as StoredEvidence | null) ?? null;
+  }
+
+  async recordJobEvent(params: {
+    jobId: string;
+    type: string;
+    payload?: Record<string, unknown>;
+    actor: Actor;
+  }): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      const job = await tx.job.findUnique({ where: { id: params.jobId } });
+      if (!job) throw notFound("Job");
+      await this.writeEvent(tx, params.jobId, params.actor, params.type, params.payload ?? {});
+    });
+  }
+
+  /* --------------------------------------------------------------- outbox */
+
+  async claimOutbox(params: { now: Date; limit: number }): Promise<StoredOutboxMessage[]> {
+    // SKIP LOCKED is the point: two workers polling the same instant take
+    // disjoint sets instead of one blocking on the other's rows. The lease is
+    // the `availableAt` push, so a worker that dies mid-delivery releases its
+    // messages by timeout rather than holding them forever.
+    return this.db.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "OutboxMessage"
+        WHERE "status" IN ('PENDING', 'FAILED') AND "availableAt" <= ${params.now}
+        ORDER BY "createdAt" ASC
+        LIMIT ${params.limit}
+        FOR UPDATE SKIP LOCKED
+      `;
+      if (rows.length === 0) return [];
+      const ids = rows.map((row) => row.id);
+      const lease = new Date(params.now.getTime() + 60_000);
+      await tx.outboxMessage.updateMany({ where: { id: { in: ids } }, data: { availableAt: lease } });
+      const claimed = await tx.outboxMessage.findMany({
+        where: { id: { in: ids } },
+        orderBy: { createdAt: "asc" }
+      });
+      return claimed.map((row) => this.toOutbox(row));
+    });
+  }
+
+  async markOutboxDelivered(params: { id: string; now: Date }): Promise<void> {
+    await this.db.outboxMessage.update({
+      where: { id: params.id },
+      // Status and timestamp move together: the CHECK constraint refuses one
+      // without the other, which is how "is this delivered" stays answerable
+      // from a single row.
+      data: { status: "SENT", deliveredAt: params.now, lastError: null }
+    });
+  }
+
+  async markOutboxFailed(params: {
+    id: string;
+    error: string;
+    now: Date;
+    retryAt: Date | null;
+  }): Promise<void> {
+    await this.db.outboxMessage.update({
+      where: { id: params.id },
+      data: {
+        attempts: { increment: 1 },
+        lastError: params.error.slice(0, 500),
+        status: params.retryAt ? "FAILED" : "DEAD",
+        ...(params.retryAt ? { availableAt: params.retryAt } : {})
+      }
+    });
+  }
+
+  async listOutbox(params: {
+    jobId?: string;
+    status?: StoredOutboxMessage["status"];
+  }): Promise<StoredOutboxMessage[]> {
+    const rows = await this.db.outboxMessage.findMany({
+      where: {
+        ...(params.jobId ? { jobId: params.jobId } : {}),
+        ...(params.status ? { status: params.status } : {})
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    return rows.map((row) => this.toOutbox(row));
+  }
+
+  private toOutbox(row: {
+    id: string;
+    topic: string;
+    dedupeKey: string;
+    jobId: string | null;
+    payload: unknown;
+    status: string;
+    attempts: number;
+    availableAt: Date;
+    lastError: string | null;
+    createdAt: Date;
+    deliveredAt: Date | null;
+  }): StoredOutboxMessage {
+    return {
+      id: row.id,
+      topic: row.topic as StoredOutboxMessage["topic"],
+      dedupeKey: row.dedupeKey,
+      jobId: row.jobId,
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      status: row.status as StoredOutboxMessage["status"],
+      attempts: row.attempts,
+      availableAt: row.availableAt,
+      lastError: row.lastError,
+      createdAt: row.createdAt,
+      deliveredAt: row.deliveredAt
+    };
+  }
+
+  /* --------------------------------------------------------------- ledger */
+
+  async appendLedgerEntries(params: {
+    entries: {
+      jobId: string;
+      kind: StoredLedgerEntry["kind"];
+      amountCents: number;
+      externalReference?: string | null;
+      note?: string | null;
+    }[];
+    actor: Actor;
+  }): Promise<StoredLedgerEntry[]> {
+    return this.db.$transaction(async (tx) => {
+      const written: StoredLedgerEntry[] = [];
+      for (const entry of params.entries) {
+        const row = await tx.ledgerEntry.create({
+          data: {
+            jobId: entry.jobId,
+            kind: entry.kind,
+            amountCents: entry.amountCents,
+            externalReference: entry.externalReference ?? null,
+            note: entry.note ?? null
+          }
+        });
+        await tx.auditLog.create({
+          data: this.auditData(params.actor, "LEDGER_ENTRY_APPENDED", "LedgerEntry", row.id, {
+            jobId: row.jobId,
+            kind: row.kind,
+            amountCents: row.amountCents
+          })
+        });
+        written.push(row as StoredLedgerEntry);
+      }
+      return written;
+    });
+  }
+
+  async listLedger(jobId: string, scope: Scope): Promise<StoredLedgerEntry[]> {
+    const job = await this.db.job.findFirst({ where: { id: jobId, ...scopeWhere(scope) } });
+    if (!job) throw notFound("Job");
+    return (await this.db.ledgerEntry.findMany({
+      where: { jobId },
+      orderBy: { createdAt: "asc" }
+    })) as StoredLedgerEntry[];
+  }
+
+  /* ---------------------------------------------------------- suggestions */
+
+  async recordSuggestion(params: {
+    jobId: string;
+    kind: string;
+    output: unknown;
+    provenance: Parameters<Store["recordSuggestion"]>[0]["provenance"];
+  }): Promise<StoredSuggestion> {
+    const row = await this.db.suggestion.create({
+      data: {
+        jobId: params.jobId,
+        kind: params.kind,
+        output: params.output as Prisma.InputJsonValue,
+        promptId: params.provenance.promptId,
+        promptVersion: params.provenance.promptVersion,
+        model: params.provenance.model,
+        confidence: params.provenance.confidence,
+        latencyMs: params.provenance.latencyMs,
+        fellBackToRules: params.provenance.fellBackToRules
+      }
+    });
+    return row as StoredSuggestion;
+  }
+
+  async listSuggestions(jobId: string, scope: Scope): Promise<StoredSuggestion[]> {
+    const job = await this.db.job.findFirst({ where: { id: jobId, ...scopeWhere(scope) } });
+    if (!job) throw notFound("Job");
+    return (await this.db.suggestion.findMany({
+      where: { jobId },
+      orderBy: { createdAt: "asc" }
+    })) as StoredSuggestion[];
   }
 
   /* ---------------------------------------------------------- idempotency */

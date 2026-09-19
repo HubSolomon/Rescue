@@ -9,7 +9,11 @@ import type {
   Job,
   JobStatus,
   OfferStatus,
+  LedgerEntryKind,
+  OutboxStatus,
+  OutboxTopic,
   ProviderStatus,
+  SuggestionProvenance,
   QuoteStatus,
   UserRole,
   VehicleClass
@@ -44,7 +48,15 @@ export const providerScope = (providerId: string): Scope => ({ kind: "provider",
 export const staffScope = (): Scope => ({ kind: "staff" });
 
 export interface Actor {
-  userId: string;
+  /**
+   * Null for the system itself -- the outbox worker, the dispatch sweep.
+   *
+   * Nullable rather than a fake user id, because a synthetic "system user"
+   * row in the audit log is indistinguishable from a real person and would
+   * quietly make "who did this" unanswerable. Both `JobEvent.actorId` and
+   * `AuditLog.actorId` are nullable in the schema for the same reason.
+   */
+  userId: string | null;
   role: UserRole;
   correlationId?: string;
 }
@@ -142,6 +154,45 @@ export interface StoredAssignment {
   currency: "EUR";
   acceptedAt: Date;
   completedAt: Date | null;
+}
+
+export interface StoredOutboxMessage {
+  id: string;
+  topic: OutboxTopic;
+  dedupeKey: string;
+  jobId: string | null;
+  payload: Record<string, unknown>;
+  status: OutboxStatus;
+  attempts: number;
+  availableAt: Date;
+  lastError: string | null;
+  createdAt: Date;
+  deliveredAt: Date | null;
+}
+
+export interface StoredLedgerEntry {
+  id: string;
+  jobId: string;
+  kind: LedgerEntryKind;
+  amountCents: number;
+  currency: string;
+  externalReference: string | null;
+  note: string | null;
+  createdAt: Date;
+}
+
+export interface StoredSuggestion {
+  id: string;
+  jobId: string;
+  kind: string;
+  output: unknown;
+  promptId: string;
+  promptVersion: string;
+  model: string;
+  confidence: number;
+  latencyMs: number;
+  fellBackToRules: boolean;
+  createdAt: Date;
 }
 
 export interface StoredEvidence {
@@ -310,11 +361,72 @@ export interface Store {
     reason?: string;
     actor: Actor;
   }): Promise<StoredOffer>;
-  /** Marks every PENDING offer past `now` as EXPIRED. Returns how many. */
-  expireOffers(now: Date, actor: Actor): Promise<number>;
+  /**
+   * Marks every PENDING offer past `now` as EXPIRED.
+   *
+   * Returns the affected job ids as well as the count, because the caller's
+   * next question is always "which jobs are now uncovered" and re-deriving it
+   * with a second query races the sweep that just ran.
+   */
+  expireOffers(now: Date, actor: Actor): Promise<{ expired: number; jobIds: string[] }>;
   findActiveAssignment(jobId: string): Promise<StoredAssignment | null>;
   /** Releases the active assignment and returns the job to TRIAGED. */
   fallbackAssignment(params: { jobId: string; reason: string; actor: Actor }): Promise<Job>;
+
+  /**
+   * Appends a job event that is not a state change.
+   *
+   * Escalations and other things worth recording on the timeline, and worth
+   * telling someone about, without pretending the job moved. Goes through the
+   * same path as a transition's event, so it lands in the outbox on the same
+   * terms.
+   */
+  recordJobEvent(params: {
+    jobId: string;
+    type: string;
+    payload?: Record<string, unknown>;
+    actor: Actor;
+  }): Promise<void>;
+
+  /* --------------------------------------------------------------- outbox */
+  /**
+   * Claims up to `limit` due messages and marks them IN FLIGHT for this
+   * worker. Implementations must make the claim atomic: two workers polling at
+   * the same instant must not both get the same row.
+   */
+  claimOutbox(params: { now: Date; limit: number }): Promise<StoredOutboxMessage[]>;
+  markOutboxDelivered(params: { id: string; now: Date }): Promise<void>;
+  /** Records a failed attempt and schedules the retry, or gives up. */
+  markOutboxFailed(params: {
+    id: string;
+    error: string;
+    now: Date;
+    retryAt: Date | null;
+  }): Promise<void>;
+  listOutbox(params: { jobId?: string; status?: OutboxStatus }): Promise<StoredOutboxMessage[]>;
+
+  /* --------------------------------------------------------------- ledger */
+  /** Append-only. There is no update and no delete, by design. */
+  appendLedgerEntries(params: {
+    entries: {
+      jobId: string;
+      kind: LedgerEntryKind;
+      amountCents: number;
+      externalReference?: string | null;
+      note?: string | null;
+    }[];
+    actor: Actor;
+  }): Promise<StoredLedgerEntry[]>;
+  listLedger(jobId: string, scope: Scope): Promise<StoredLedgerEntry[]>;
+
+  /* ---------------------------------------------------------- suggestions */
+  recordSuggestion(params: {
+    jobId: string;
+    kind: string;
+    output: unknown;
+    provenance: SuggestionProvenance;
+  }): Promise<StoredSuggestion>;
+  listSuggestions(jobId: string, scope: Scope): Promise<StoredSuggestion[]>;
 
   /* ------------------------------------------------------------- evidence */
   createEvidence(params: {

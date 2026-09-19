@@ -3,7 +3,8 @@ import { z } from "zod";
 import { createOffersSchema, fallbackSchema, offerStatusSchema, respondToOfferSchema } from "@rescue/contracts";
 import { MINUTE_MS, type Clock } from "../lib/clock.js";
 import { AppError, notFound } from "../lib/errors.js";
-import { demandFromItems, rankProviders, type EligibilityProvider } from "../lib/eligibility.js";
+import { demandFromItems, rankProviders } from "../lib/eligibility.js";
+import { DispatchSweep, loadEligibilityProviders } from "../lib/dispatch.js";
 import { requireAuth, requireProvider, requireRole } from "../plugins/auth.js";
 import type { IdempotencyRunner } from "../plugins/idempotency.js";
 import type { Store, StoredOffer } from "../store/types.js";
@@ -12,6 +13,7 @@ export interface OfferRouteDeps {
   store: Store;
   idempotency: IdempotencyRunner;
   clock: Clock;
+  sweep: DispatchSweep;
 }
 
 const jobIdParams = z.object({ id: z.string().uuid() });
@@ -24,27 +26,6 @@ function publicOffer(offer: StoredOffer) {
     respondedAt: offer.respondedAt?.toISOString() ?? null,
     createdAt: offer.createdAt.toISOString()
   };
-}
-
-/** Assembles the eligibility inputs for a job from stored provider records. */
-async function loadEligibilityProviders(store: Store): Promise<EligibilityProvider[]> {
-  const providers = await store.listProviders({});
-  return Promise.all(
-    providers.map(async (provider) => ({
-      id: provider.id,
-      status: provider.status,
-      acceptingWork: provider.acceptingWork,
-      basePostalCode: provider.basePostalCode,
-      serviceRadiusKm: provider.serviceRadiusKm,
-      serviceTypes: provider.serviceTypes as EligibilityProvider["serviceTypes"],
-      vehicles: await store.listVehicles(provider.id),
-      documents: (await store.listDocuments(provider.id)).map((document) => ({
-        type: document.type as EligibilityProvider["documents"][number]["type"],
-        status: document.status,
-        expiresAt: document.expiresAt
-      }))
-    }))
-  );
 }
 
 export const offerRoutes =
@@ -235,7 +216,9 @@ export const offerRoutes =
      */
     app.post("/offers/expire", async (request) => {
       const auth = requireRole(request, "ADMIN");
-      const expired = await deps.store.expireOffers(deps.clock.now(), auth.actor);
-      return { data: { expired } };
+      // The sweep does not only expire: a job whose last offer just lapsed is
+      // uncovered, and covering it again is the point of running this.
+      const result = await deps.sweep.run(auth.actor);
+      return { data: result };
     });
   };

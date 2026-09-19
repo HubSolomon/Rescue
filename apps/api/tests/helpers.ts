@@ -154,3 +154,75 @@ export async function jobThroughToAssigned(h: Harness) {
 
   return { jobId, quoteId, offerId, offers: offerList, accepted };
 }
+
+/**
+ * Onboards a second eligible provider through the real routes.
+ *
+ * The development seed deliberately has exactly one provider that passes
+ * eligibility -- the others are excluded for real reasons, which is what makes
+ * the dispatcher's exclusion list worth looking at. A fallback test needs
+ * somebody to fall back *to*, and adding one to the seed would quietly change
+ * every count in every other test. So it is built here, through the same
+ * endpoints a real provider would use.
+ */
+export async function onboardEligibleProvider(
+  h: Harness,
+  legalName = "Bremer Zweitfahrt UG"
+): Promise<string> {
+  const admin = await h.auth(SUBJECTS.admin);
+  const compliance = await h.auth(SUBJECTS.compliance);
+
+  const created = await h.app.inject({
+    method: "POST",
+    url: "/v1/providers",
+    headers: { ...admin, ...idem() },
+    payload: {
+      legalName,
+      // Same postal code as VALID_JOB's pickup, so distance is not the thing
+      // under test.
+      basePostalCode: "28195",
+      serviceRadiusKm: 40,
+      serviceTypes: ["FAILED_DELIVERY", "BULKY_RETURN"],
+      contactEmail: `dispo@${legalName.toLowerCase().replace(/[^a-z]+/g, "-")}.example`
+    }
+  });
+  const providerId = created.json().data.id as string;
+
+  await h.app.inject({
+    method: "POST",
+    url: `/v1/providers/${providerId}/vehicles`,
+    headers: { ...admin, ...idem() },
+    payload: {
+      registration: `HB-Z${Math.floor(Math.random() * 9000) + 1000}`,
+      vehicleClass: "BOX_VAN",
+      payloadKg: 3000,
+      volumeM3: 22,
+      active: true
+    }
+  });
+
+  for (const type of ["LIABILITY_INSURANCE", "TRADE_LICENCE"] as const) {
+    const document = await h.app.inject({
+      method: "POST",
+      url: `/v1/providers/${providerId}/documents`,
+      headers: { ...admin, ...idem() },
+      payload: { type, storageKey: `test/${providerId}/${type}.pdf` }
+    });
+    await h.app.inject({
+      method: "POST",
+      url: `/v1/providers/${providerId}/documents/${document.json().data.id}/review`,
+      headers: compliance,
+      payload: { status: "VERIFIED", reason: "Checked for the test fixture" }
+    });
+  }
+
+  // Activation is a compliance decision, so it goes through compliance.
+  await h.app.inject({
+    method: "POST",
+    url: `/v1/providers/${providerId}/review`,
+    headers: compliance,
+    payload: { status: "ACTIVE", reason: "Onboarded for the test fixture" }
+  });
+
+  return providerId;
+}
