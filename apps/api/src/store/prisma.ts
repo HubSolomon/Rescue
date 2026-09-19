@@ -2,6 +2,7 @@ import { canTransition, type CreateJobInput, type Job, type JobStatus } from "@r
 import type { Prisma, PrismaClient } from "@rescue/database";
 import { AppError, conflict, invalidTransition, notFound } from "../lib/errors.js";
 import { outboxForEvent } from "../lib/outbox.js";
+import { REDACTED_NAME, redactedEmail, redactedSubject } from "../lib/privacy.js";
 import type {
   AcceptOfferResult,
   Actor,
@@ -1064,6 +1065,84 @@ export class PrismaStore implements Store {
       byStatus[row.status as StoredOutboxMessage["status"]] = row._count._all;
     }
     return { byStatus, oldestUndelivered: oldest?.createdAt ?? null };
+  }
+
+  /* ------------------------------------------------------------ retention */
+
+  async runRetention(params: {
+    now: Date;
+    evidenceOlderThan: Date;
+    outboxSentOlderThan: Date;
+    idempotencyOlderThan: Date;
+  }): Promise<{ evidence: number; outbox: number; idempotency: number; storageKeys: string[] }> {
+    // The keys are read before the rows go, in the same transaction. Reading
+    // them afterwards would mean a crash between the two leaves objects in the
+    // bucket with nothing left pointing at them -- personal data that no
+    // subsequent run can find.
+    const doomed = await this.db.evidence.findMany({
+      where: { createdAt: { lt: params.evidenceOlderThan } },
+      select: { id: true, storageKey: true }
+    });
+
+    const [, outbox, idempotency] = await this.db.$transaction([
+      this.db.evidence.deleteMany({ where: { id: { in: doomed.map((row) => row.id) } } }),
+      this.db.outboxMessage.deleteMany({
+        // SENT only, and by the time it settled. A DEAD row is undelivered
+        // work: it survives until a person has dealt with it.
+        where: { status: "SENT", deliveredAt: { lt: params.outboxSentOlderThan } }
+      }),
+      this.db.idempotencyKey.deleteMany({ where: { expiresAt: { lt: params.idempotencyOlderThan } } })
+    ]);
+
+    return {
+      evidence: doomed.length,
+      outbox: outbox.count,
+      idempotency: idempotency.count,
+      storageKeys: doomed.map((row) => row.storageKey)
+    };
+  }
+
+  async erasePerson(params: {
+    userId: string;
+    now: Date;
+    actor: Actor;
+  }): Promise<{ erased: boolean; evidenceUnlinked: number }> {
+    return this.db.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({ where: { id: params.userId } });
+      if (!user || user.subject.startsWith("erased:")) {
+        return { erased: false, evidenceUnlinked: 0 };
+      }
+
+      await tx.user.update({
+        where: { id: params.userId },
+        data: {
+          name: REDACTED_NAME,
+          email: redactedEmail(params.userId),
+          subject: redactedSubject(params.userId)
+        }
+      });
+
+      const unlinked = await tx.evidence.updateMany({
+        where: { uploadedByUserId: params.userId },
+        data: { uploadedByUserId: null }
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId: params.actor.userId,
+          actorRole: params.actor.role,
+          action: "PERSON_ERASED",
+          entityType: "User",
+          entityId: params.userId,
+          // The count, never the values. Writing the old name here would put
+          // it back into the one table that cannot be corrected afterwards.
+          metadata: { evidenceUnlinked: unlinked.count },
+          correlationId: params.actor.correlationId ?? null
+        }
+      });
+
+      return { erased: true, evidenceUnlinked: unlinked.count };
+    });
   }
 
   private toOutbox(row: {

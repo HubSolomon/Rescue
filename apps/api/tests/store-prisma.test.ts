@@ -113,6 +113,8 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
   const PROVIDER_A = "33333333-3333-4333-8333-333333333333";
   const PROVIDER_B = "44444444-4444-4444-8444-444444444444";
   const USER = "aaaa1111-1111-4111-8111-111111111111";
+  const ERASEABLE = "55555555-5555-4555-8555-555555555555";
+  const ERASEABLE_SUBJECT = "test|to-be-erased";
 
   runStoreConformance("PrismaStore", {
     async create() {
@@ -163,8 +165,18 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
           }
         ]
       });
-      await db.user.create({
-        data: { id: USER, subject: "test|dispatcher", email: "d@example.com", name: "Dispatcher" }
+      await db.user.createMany({
+        data: [
+          { id: USER, subject: "test|dispatcher", email: "d@example.com", name: "Dispatcher" },
+          // A second person, so the erasure cases can destroy one without
+          // taking the actor every other case writes with.
+          {
+            id: ERASEABLE,
+            subject: ERASEABLE_SUBJECT,
+            email: "erase-me@example.com",
+            name: "Zu Loeschen"
+          }
+        ]
       });
 
       return {
@@ -173,7 +185,8 @@ if (DATABASE_URL && !looksLikeTestDatabase) {
         organizationB: ORG_B,
         providerA: PROVIDER_A,
         providerB: PROVIDER_B,
-        actor: { userId: USER, role: "DISPATCHER" as const }
+        actor: { userId: USER, role: "DISPATCHER" as const },
+        eraseableSubject: ERASEABLE_SUBJECT
       };
     }
   });

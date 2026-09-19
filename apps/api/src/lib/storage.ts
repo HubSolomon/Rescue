@@ -44,6 +44,16 @@ export interface EvidenceStorage {
    * does, before it asks for a ticket.
    */
   createDownloadTicket(params: { storageKey: string; now: Date }): DownloadTicket;
+  /**
+   * Removes the object.
+   *
+   * The retention job needs this: deleting the row and leaving the photograph
+   * in the bucket produces a system that passes an audit of its database and
+   * fails an audit of its storage. Deleting an object that is already gone is
+   * not an error -- retention runs again tomorrow, and a sweep that fails on
+   * its own previous success never finishes.
+   */
+  delete(storageKey: string): Promise<void>;
 }
 
 const EXTENSION_BY_MIME: Record<EvidenceMimeType, string> = {
@@ -143,5 +153,19 @@ export class MockEvidenceStorage implements EvidenceStorage {
     url.searchParams.set("X-Signature", signature);
     url.searchParams.set("X-Expires", String(expiresUnix));
     return { downloadUrl: url.toString(), expiresAt };
+  }
+
+  /**
+   * Records the key and returns.
+   *
+   * The mock never stored an object, so there is nothing to remove -- but a
+   * silent no-op would let the retention job report a clean sweep in a
+   * development run and leave every photograph in place in a real one. The
+   * keys are kept so a test can assert the job asked, and `deleted` is the
+   * only way to tell the difference between "removed" and "never called".
+   */
+  readonly deleted: string[] = [];
+  async delete(storageKey: string): Promise<void> {
+    this.deleted.push(storageKey);
   }
 }

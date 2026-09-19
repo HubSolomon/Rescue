@@ -1,6 +1,7 @@
 import { canTransition, type CreateJobInput, type Job, type JobStatus } from "@rescue/contracts";
 import { newId } from "../lib/crypto.js";
 import { outboxForEvent } from "../lib/outbox.js";
+import { REDACTED_NAME, redactedEmail, redactedSubject } from "../lib/privacy.js";
 import { AppError, conflict, invalidTransition, notFound } from "../lib/errors.js";
 import type {
   AcceptOfferResult,
@@ -107,7 +108,10 @@ export class MemoryStore implements Store {
       this.organizations.set(organization.id, organization);
     }
     for (const user of seed.users ?? []) {
-      this.users.set(user.subject, user);
+      // Copied, not referenced. The seed is a module-level constant shared by
+      // every store in the process, so holding the same object would let one
+      // test's write -- an erasure, say -- reach the next test's store.
+      this.users.set(user.subject, { ...user });
     }
     for (const provider of seed.providers ?? []) {
       const { vehicles = [], documents = [], ...rest } = provider;
@@ -927,6 +931,77 @@ export class MemoryStore implements Store {
       }
     }
     return { byStatus, oldestUndelivered };
+  }
+
+  /* ------------------------------------------------------------ retention */
+
+  async runRetention(params: {
+    now: Date;
+    evidenceOlderThan: Date;
+    outboxSentOlderThan: Date;
+    idempotencyOlderThan: Date;
+  }): Promise<{ evidence: number; outbox: number; idempotency: number; storageKeys: string[] }> {
+    const storageKeys: string[] = [];
+    for (const [id, item] of [...this.evidence]) {
+      if (item.createdAt >= params.evidenceOlderThan) continue;
+      // The key goes back to the caller so the object can be removed from
+      // storage too. A row deleted while its photograph stays in a bucket is
+      // the version of this job that looks compliant and is not.
+      if (item.storageKey) storageKeys.push(item.storageKey);
+      this.evidence.delete(id);
+    }
+
+    let outbox = 0;
+    for (const [id, message] of [...this.outbox]) {
+      // SENT only. A DEAD row is undelivered work and survives the sweep.
+      if (message.status !== "SENT") continue;
+      const settled = message.deliveredAt ?? message.createdAt;
+      if (settled >= params.outboxSentOlderThan) continue;
+      this.outboxKeys.delete(message.dedupeKey);
+      this.outbox.delete(id);
+      outbox += 1;
+    }
+
+    let idempotency = 0;
+    for (const [key, record] of [...this.idempotency]) {
+      if (record.expiresAt >= params.idempotencyOlderThan) continue;
+      this.idempotency.delete(key);
+      idempotency += 1;
+    }
+
+    return { evidence: storageKeys.length, outbox, idempotency, storageKeys };
+  }
+
+  async erasePerson(params: {
+    userId: string;
+    now: Date;
+    actor: Actor;
+  }): Promise<{ erased: boolean; evidenceUnlinked: number }> {
+    // Keyed by subject here, because that is the lookup every request makes.
+    const user = [...this.users.values()].find((candidate) => candidate.id === params.userId);
+    if (!user || user.subject.startsWith("erased:")) {
+      return { erased: false, evidenceUnlinked: 0 };
+    }
+
+    this.users.delete(user.subject);
+    user.name = REDACTED_NAME;
+    user.email = redactedEmail(params.userId);
+    user.subject = redactedSubject(params.userId);
+    // Re-keyed under the severed subject, so the old one resolves to nobody.
+    this.users.set(user.subject, user);
+
+    let evidenceUnlinked = 0;
+    for (const item of this.evidence.values()) {
+      if (item.uploadedByUserId !== params.userId) continue;
+      item.uploadedByUserId = null;
+      evidenceUnlinked += 1;
+    }
+
+    // The erasure itself is auditable. It names the id, never the name that
+    // was there: writing the old value into the audit log would undo the
+    // erasure in the one table that cannot be corrected afterwards.
+    this.recordAudit(params.actor, "PERSON_ERASED", "User", params.userId, { evidenceUnlinked });
+    return { erased: true, evidenceUnlinked };
   }
 
   /* --------------------------------------------------------------- ledger */

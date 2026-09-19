@@ -23,6 +23,8 @@ export interface ConformanceContext {
     providerA: string;
     providerB: string;
     actor: Actor;
+    /** A user the erasure test may destroy without breaking the others. */
+    eraseableSubject: string;
   }>;
 }
 
@@ -476,6 +478,117 @@ export function runStoreConformance(name: string, context: ConformanceContext): 
       // metric look healthy. It is the oldest thing that never happened.
       expect(stats.oldestUndelivered).toBeInstanceOf(Date);
       await store.close();
+    });
+  });
+
+  describe(`${name}: retention and erasure`, () => {
+    it("removes a delivered outbox row and leaves a dead one", async () => {
+      const { store, organizationA, actor } = await context.create();
+      // Two jobs, so there are two messages: one to deliver and one to kill.
+      await store.createJob({ organizationId: organizationA, input: JOB_INPUT, actor });
+      await store.createJob({ organizationId: organizationA, input: JOB_INPUT, actor });
+      const now = new Date();
+      const claimed = await store.claimOutbox({ now, limit: 50 });
+      expect(claimed.length).toBeGreaterThan(1);
+
+      const long = new Date(now.getTime() - 90 * 24 * 3600_000);
+      await store.markOutboxDelivered({ id: claimed[0]!.id, now: long });
+      await store.markOutboxFailed({
+        id: claimed[1]!.id,
+        error: "gave up",
+        now: long,
+        retryAt: null
+      });
+
+      const removed = await store.runRetention({
+        now,
+        evidenceOlderThan: new Date(now.getTime() - 365 * 24 * 3600_000),
+        outboxSentOlderThan: new Date(now.getTime() - 30 * 24 * 3600_000),
+        idempotencyOlderThan: new Date(now.getTime() - 7 * 24 * 3600_000)
+      });
+
+      expect(removed.outbox).toBe(1);
+      const stats = await store.outboxStats();
+      expect(stats.byStatus.SENT).toBe(0);
+      // The dead letter survives. It is work that never happened.
+      expect(stats.byStatus.DEAD).toBe(1);
+      await store.close();
+    });
+
+    it("hands back the storage keys of the evidence it removed", async () => {
+      const { store, organizationA, actor } = await context.create();
+      const job = await store.createJob({ organizationId: organizationA, input: JOB_INPUT, actor });
+      await store.createEvidence({
+        jobId: job.id,
+        kind: "PICKUP_PHOTO",
+        mimeType: "image/jpeg",
+        sizeBytes: 2048,
+        storageKey: `jobs/${job.id}/pickup.jpg`,
+        actor
+      });
+
+      const now = new Date();
+      // Nothing is old enough yet, so nothing goes and no key comes back.
+      const untouched = await store.runRetention({
+        now,
+        evidenceOlderThan: new Date(now.getTime() - 365 * 24 * 3600_000),
+        outboxSentOlderThan: new Date(now.getTime() - 30 * 24 * 3600_000),
+        idempotencyOlderThan: new Date(now.getTime() - 7 * 24 * 3600_000)
+      });
+      expect(untouched.evidence).toBe(0);
+      expect(untouched.storageKeys).toEqual([]);
+
+      // Everything in the past: the row goes and the key comes back, so the
+      // object can be removed from the bucket too.
+      const swept = await store.runRetention({
+        now,
+        evidenceOlderThan: new Date(now.getTime() + 1000),
+        outboxSentOlderThan: new Date(now.getTime() - 30 * 24 * 3600_000),
+        idempotencyOlderThan: new Date(now.getTime() - 7 * 24 * 3600_000)
+      });
+      expect(swept.evidence).toBe(1);
+      expect(swept.storageKeys).toEqual([`jobs/${job.id}/pickup.jpg`]);
+      expect(await store.listEvidence(job.id, staffScope())).toEqual([]);
+      await store.close();
+    });
+
+    it("erasing a person breaks the subject lookup and is not repeatable", async () => {
+      const ctx = await context.create();
+      const user = await ctx.store.findUserBySubject(ctx.eraseableSubject);
+      expect(user).not.toBeNull();
+
+      const first = await ctx.store.erasePerson({
+        userId: user!.id,
+        now: new Date(),
+        actor: ctx.actor
+      });
+      expect(first.erased).toBe(true);
+      expect(await ctx.store.findUserBySubject(ctx.eraseableSubject)).toBeNull();
+
+      const second = await ctx.store.erasePerson({
+        userId: user!.id,
+        now: new Date(),
+        actor: ctx.actor
+      });
+      expect(second.erased).toBe(false);
+      await ctx.store.close();
+    });
+
+    it("erasure leaves the job and its events in place", async () => {
+      const ctx = await context.create();
+      const job = await ctx.store.createJob({
+        organizationId: ctx.organizationA,
+        input: JOB_INPUT,
+        actor: ctx.actor
+      });
+      const user = await ctx.store.findUserBySubject(ctx.eraseableSubject);
+
+      await ctx.store.erasePerson({ userId: user!.id, now: new Date(), actor: ctx.actor });
+
+      // Article 17(3)(b). The commercial record stays; the name is gone.
+      expect(await ctx.store.findJob(job.id, staffScope())).not.toBeNull();
+      expect((await ctx.store.listJobEvents(job.id, staffScope())).length).toBeGreaterThan(0);
+      await ctx.store.close();
     });
   });
 }

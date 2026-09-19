@@ -34,6 +34,8 @@ import { authPlugin } from "./plugins/auth.js";
 import { createIdempotencyRunner } from "./plugins/idempotency.js";
 import { buildOpenApiDocument } from "./openapi.js";
 import { createMetrics, type AppMetrics } from "./lib/metrics.js";
+import { RetentionJob } from "./lib/retention.js";
+import { privacyRoutes } from "./routes/privacy.js";
 import { REDACTED_LOG_PATHS } from "./lib/redaction.js";
 import { metricsRoutes } from "./routes/metrics.js";
 import { authRoutes } from "./routes/auth.js";
@@ -55,6 +57,7 @@ declare module "fastify" {
     sweep: DispatchSweep;
     systemActor: { userId: string | null; role: "DISPATCHER"; correlationId: string };
     metrics: AppMetrics;
+    retention: RetentionJob;
   }
 }
 
@@ -388,7 +391,21 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
   // Exposed so the server can start it, and so a test can drain it by hand
   // instead of waiting for a timer.
+  const retention = new RetentionJob({
+    store,
+    clock,
+    storage,
+    logger: app.log,
+    metrics,
+    config: {
+      evidenceDays: config.RETENTION_EVIDENCE_DAYS,
+      outboxSentDays: config.RETENTION_OUTBOX_SENT_DAYS,
+      idempotencyDays: config.RETENTION_IDEMPOTENCY_DAYS
+    }
+  });
+
   app.decorate("outbox", worker);
+  app.decorate("retention", retention);
   app.decorate("sweep", sweep);
   app.decorate("systemActor", systemActor);
   app.decorate("metrics", metrics);
@@ -437,6 +454,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
       await scoped.register(quoteRoutes({ store, idempotency, clock }));
       await scoped.register(offerRoutes({ store, idempotency, clock, sweep, maps }));
       await scoped.register(evidenceRoutes({ store, storage, clock }));
+      await scoped.register(privacyRoutes({ store, clock }));
     },
     { prefix: "/v1" }
   );

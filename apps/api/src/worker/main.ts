@@ -63,9 +63,28 @@ async function main(): Promise<void> {
   const sweepTimer = setInterval(() => void sweepTick(), config.SWEEP_INTERVAL_MS);
   void sweepTick();
 
+  /**
+   * Retention, once a day.
+   *
+   * Storage limitation is violated by doing nothing, so this runs on a timer
+   * in the same process rather than as a cron job someone has to remember to
+   * install. Daily because every window here is measured in days: running it
+   * hourly would delete the same nothing twenty-three extra times.
+   */
+  const retentionTick = async () => {
+    try {
+      await app.retention.run();
+    } catch (error) {
+      log.error({ err: error }, "retention sweep failed");
+    }
+  };
+  const retentionTimer = setInterval(() => void retentionTick(), 24 * 60 * 60 * 1000);
+  void retentionTick();
+
   const shutdown = async (signal: string) => {
     log.info({ signal }, "worker stopping");
     clearInterval(sweepTimer);
+    clearInterval(retentionTimer);
     // Stop claiming, then close. In-flight deliveries finish; anything claimed
     // and not marked delivered returns to the queue when its lease expires.
     await app.outbox.stop();

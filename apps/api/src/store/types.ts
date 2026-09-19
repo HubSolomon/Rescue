@@ -418,6 +418,41 @@ export interface Store {
     oldestUndelivered: Date | null;
   }>;
 
+  /* ------------------------------------------------------ retention */
+  /**
+   * Removes data whose purpose has expired.
+   *
+   * Only the three categories the inventory marks deletable, and only rows
+   * past their window. Dead letters are never swept: they are work that never
+   * happened, and a queue that tidies away its own failures is a queue nobody
+   * can audit. Returns what it removed, so the caller can count it rather than
+   * trust it.
+   */
+  runRetention(params: {
+    now: Date;
+    evidenceOlderThan: Date;
+    outboxSentOlderThan: Date;
+    idempotencyOlderThan: Date;
+  }): Promise<{ evidence: number; outbox: number; idempotency: number; storageKeys: string[] }>;
+
+  /**
+   * Severs a person from every record that points at them.
+   *
+   * Not a delete. The commercial and tax records that mention this user's id
+   * must survive, so what changes is the one row that turns an id into a
+   * person: name, email and the identity-provider subject are overwritten, and
+   * the subject is replaced with a value no provider can issue, so signing in
+   * again creates a new person rather than reviving this one.
+   *
+   * Idempotent, and honest about it: erasing an already-erased user reports
+   * zero changes rather than pretending to have done something.
+   */
+  erasePerson(params: {
+    userId: string;
+    now: Date;
+    actor: Actor;
+  }): Promise<{ erased: boolean; evidenceUnlinked: number }>;
+
   /* --------------------------------------------------------------- ledger */
   /** Append-only. There is no update and no delete, by design. */
   appendLedgerEntries(params: {
