@@ -222,6 +222,11 @@ input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--
 
 /* -------------------------------------------------------------- styleguide */
 
+/* A group heading inside a panel. h4, because the panel title is already the
+   h3 -- a second h3 inside it would flatten the outline a screen reader
+   announces into a list of siblings with no parent. */
+.swatch-group { color: var(--navy); font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; margin: 22px 0 0; }
+.swatch-group:first-of-type { margin-top: 14px; }
 .swatches { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 .swatch { display: flex; align-items: center; gap: 12px; }
 .swatch-chip { width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--line); flex: none; }

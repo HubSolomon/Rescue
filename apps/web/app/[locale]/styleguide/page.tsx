@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import type { JobStatus } from "@rescue/contracts";
 import { jobStatuses } from "@rescue/contracts";
 import { formatDate, getMessages, isLocale, type Locale } from "../../../i18n/index";
+import { colourTokens, type ColourToken } from "../../../lib/tokens";
+import { TOKEN_NOTES } from "../../../lib/token-notes";
 import {
   DefinitionList,
   EmptyState,
@@ -42,18 +44,6 @@ export function generateStaticParams() {
   return [{ locale: "de" }, { locale: "en" }];
 }
 
-/** Colour tokens, with the reason each one exists. */
-const COLOURS = [
-  { token: "--navy", value: "#0d2b44", use: "Headings, structure, the wordmark" },
-  { token: "--green", value: "#0d9b67", use: "The mark and decorative shapes. Never text" },
-  { token: "--green-strong", value: "#0b8458", use: "Buttons and green text. 4.7:1 with white" },
-  { token: "--amber", value: "#f6a641", use: "Attention that is not yet failure" },
-  { token: "--ink", value: "#1d2733", use: "Body text" },
-  { token: "--muted", value: "#607080", use: "Secondary text, metadata" },
-  { token: "--pale", value: "#f4f7f9", use: "Console background behind panels" },
-  { token: "--line", value: "#d7e0e7", use: "Borders and dividers" }
-] as const;
-
 const TYPE_SCALE = [
   { name: "h1", note: "clamp(42px, 6vw, 70px) · only on the landing page" },
   { name: "h2", note: "32px · one per page, the page's own title" },
@@ -63,17 +53,28 @@ const TYPE_SCALE = [
   { name: "small", note: "13px · metadata, never the only carrier of meaning" }
 ] as const;
 
-function Swatch({ token, value, use }: { token: string; value: string; use: string }) {
+function Swatch({ token }: { token: ColourToken }) {
   return (
     <li className="swatch">
-      <span className="swatch-chip" style={{ background: value }} aria-hidden="true" />
+      <span className="swatch-chip" style={{ background: token.value }} aria-hidden="true" />
       <span>
-        <code>{token}</code>
-        <span className="muted small"> {value}</span>
-        <span className="muted small swatch-use">{use}</span>
+        <code>{token.name}</code>
+        <span className="muted small"> {token.value}</span>
+        <span className="muted small swatch-use">{TOKEN_NOTES[token.name]}</span>
       </span>
     </li>
   );
+}
+
+/** Keeps the stylesheet's own grouping comments as the page's headings. */
+function groupTokens(tokens: ColourToken[]): { group: string; tokens: ColourToken[] }[] {
+  const groups: { group: string; tokens: ColourToken[] }[] = [];
+  for (const token of tokens) {
+    const last = groups[groups.length - 1];
+    if (last && last.group === token.group) last.tokens.push(token);
+    else groups.push({ group: token.group, tokens: [token] });
+  }
+  return groups;
 }
 
 export default async function StyleguidePage({
@@ -164,11 +165,21 @@ export default async function StyleguidePage({
             every button and every piece of green text. Amber means attention, not failure; red is
             reserved for errors and appears nowhere else.
           </p>
-          <ul className="swatches">
-            {COLOURS.map((colour) => (
-              <Swatch key={colour.token} {...colour} />
-            ))}
-          </ul>
+          <p className="muted small">
+            Every custom property <code>:root</code> declares, read out of{" "}
+            <code>globals.css</code> when this page is built. There is no second copy to fall out
+            of step with it, and the headings below are the stylesheet&rsquo;s own.
+          </p>
+          {groupTokens(colourTokens()).map((section) => (
+            <div key={section.group}>
+              <h4 className="swatch-group">{section.group}</h4>
+              <ul className="swatches">
+                {section.tokens.map((token) => (
+                  <Swatch key={token.name} token={token} />
+                ))}
+              </ul>
+            </div>
+          ))}
         </Panel>
 
         <Panel title="Type">
