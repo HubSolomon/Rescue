@@ -1,6 +1,7 @@
 import type { EligibilityResult, Job } from "@rescue/contracts";
 import { demandFromItems, rankProviders, type EligibilityProvider } from "./eligibility.js";
 import { MINUTE_MS, type Clock } from "./clock.js";
+import type { MapsProvider } from "./maps.js";
 import type { Actor, Store } from "../store/types.js";
 
 /**
@@ -23,11 +24,35 @@ import type { Actor, Store } from "../store/types.js";
  * a provider accepts or a person acts -- see `tests/human-in-the-loop.test.ts`.
  */
 
-/** Assembles the eligibility inputs for every provider in the system. */
-export async function loadEligibilityProviders(store: Store): Promise<EligibilityProvider[]> {
+/**
+ * Assembles the eligibility inputs for every provider in the system.
+ *
+ * When a maps provider is given, each provider's road distance to the pickup
+ * is resolved here -- before ranking, not inside it -- so `rankProviders`
+ * stays a pure synchronous function of stored facts. Resolution is sequential
+ * rather than parallel because the open geocoder asks for at most one request
+ * a second, and the caching wrapper turns the second call for a postal code
+ * into no call at all.
+ */
+export async function loadEligibilityProviders(
+  store: Store,
+  options: { maps?: MapsProvider; pickupPostalCode?: string } = {}
+): Promise<EligibilityProvider[]> {
   const providers = await store.listProviders({});
+  const roadDistances = new Map<string, number>();
+
+  if (options.maps && options.pickupPostalCode) {
+    for (const provider of providers) {
+      const estimate = await options.maps.route(provider.basePostalCode, options.pickupPostalCode);
+      // Only a measured distance is recorded. A fallback answer would set the
+      // field and make the result claim a road distance it does not have.
+      if (estimate.isRoadDistance) roadDistances.set(provider.id, estimate.distanceKm);
+    }
+  }
+
   return Promise.all(
     providers.map(async (provider) => ({
+      roadDistanceKm: roadDistances.get(provider.id),
       id: provider.id,
       status: provider.status,
       acceptingWork: provider.acceptingWork,
@@ -48,10 +73,11 @@ export async function loadEligibilityProviders(store: Store): Promise<Eligibilit
 export async function rankForJob(
   store: Store,
   job: Job,
-  now: Date
+  now: Date,
+  maps?: MapsProvider
 ): Promise<EligibilityResult[]> {
   return rankProviders(
-    await loadEligibilityProviders(store),
+    await loadEligibilityProviders(store, { maps, pickupPostalCode: job.pickup.postalCode }),
     {
       jobType: job.type,
       pickupPostalCode: job.pickup.postalCode,
@@ -96,6 +122,7 @@ export class DispatchSweep {
     private readonly deps: {
       store: Store;
       clock: Clock;
+      maps?: MapsProvider;
       config?: Partial<SweepConfig>;
     }
   ) {}
@@ -151,7 +178,7 @@ export class DispatchSweep {
     }
 
     const alreadyAsked = new Set(offers.map((offer) => offer.providerId));
-    const ranked = await rankForJob(this.deps.store, job, now);
+    const ranked = await rankForJob(this.deps.store, job, now, this.deps.maps);
     const next = ranked
       .filter((candidate) => candidate.eligible && !alreadyAsked.has(candidate.providerId))
       .slice(0, this.config.providersPerRound);

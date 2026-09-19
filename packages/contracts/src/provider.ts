@@ -143,6 +143,14 @@ export const eligibilityResultSchema = z.object({
   reasons: z.array(ineligibilityReasonSchema),
   /** Lower ranks first. Only meaningful when `eligible` is true. */
   rank: z.number().int().nullable(),
-  distanceKm: z.number().nullable()
+  distanceKm: z.number().nullable(),
+  /**
+   * False when `distanceKm` came from the offline postal-code estimate.
+   *
+   * The dispatcher console says so beside the number. A guess presented as a
+   * road distance is worse than no number at all, because a person will plan
+   * around it.
+   */
+  distanceIsRoad: z.boolean()
 });
 export type EligibilityResult = z.infer<typeof eligibilityResultSchema>;

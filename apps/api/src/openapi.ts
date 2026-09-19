@@ -301,7 +301,7 @@ export function buildOpenApiDocument(version: string): Record<string, unknown> {
       "/offers/expire": {
         post: {
           tags: ["ops"],
-          summary: "Expire every pending offer past its deadline",
+          summary: "Run the dispatch sweep: expire lapsed offers, re-cover uncovered jobs",
           responses: { "200": jsonResponse("Sweep result"), ...ERRORS }
         }
       },
@@ -373,6 +373,14 @@ export function buildOpenApiDocument(version: string): Record<string, unknown> {
           summary: "Short-lived signed URL for one uploaded evidence object",
           parameters: [idParam("evidenceId"), ...TENANT_HEADER_PARAMS],
           responses: { "200": jsonResponse("Download ticket"), ...ERRORS }
+        }
+      },
+      "/jobs/{id}/ledger": {
+        get: {
+          tags: ["commerce"],
+          summary: "Money movements on a job, with the fold over them",
+          parameters: [idParam(), ...TENANT_HEADER_PARAMS],
+          responses: { "200": jsonResponse("Ledger entries and totals"), ...ERRORS }
         }
       },
       "/providers": {

@@ -12,6 +12,7 @@ import { requireAuth, requireOrganization, requireRole } from "../plugins/auth.j
 import type { IdempotencyRunner } from "../plugins/idempotency.js";
 import type { Store } from "../store/types.js";
 import type { TriageService } from "../lib/triage.js";
+import { isLowConfidence, ValidatingTriageService } from "../lib/ai.js";
 
 export interface JobRouteDeps {
   store: Store;
@@ -47,10 +48,44 @@ export const jobRoutes =
             input,
             actor: auth.actor
           });
-          const triage = await deps.triage.suggest(input);
+          /**
+           * The suggestion, and the record of where it came from.
+           *
+           * Recorded whether or not a dispatcher ever acts on it: the audit
+           * question is "what was proposed", not "what was taken". Recording
+           * failing must not fail job creation, so it is caught -- a job
+           * without its suggestion row is recoverable, a lost job is not.
+           */
+          const result =
+            deps.triage instanceof ValidatingTriageService
+              ? await deps.triage.suggestWithProvenance(input)
+              : { suggestion: await deps.triage.suggest(input), provenance: null };
+
+          if (result.provenance) {
+            try {
+              await deps.store.recordSuggestion({
+                jobId: job.id,
+                kind: "triage",
+                output: result.suggestion,
+                provenance: result.provenance
+              });
+            } catch (error) {
+              request.log.warn({ err: error, jobId: job.id }, "could not record the suggestion");
+            }
+          }
+
           return {
             statusCode: 201,
-            body: { data: { job, triage }, meta: { humanApprovalRequired: true } }
+            body: {
+              data: { job, triage: result.suggestion },
+              meta: {
+                // Always true. Not derived from confidence, not a field the
+                // model fills in: a person approves, full stop.
+                humanApprovalRequired: true,
+                provenance: result.provenance,
+                lowConfidence: result.provenance ? isLowConfidence(result.provenance) : false
+              }
+            }
           };
         }
       });

@@ -76,6 +76,18 @@ const baseSchema = z.object({
   S3_SECRET_KEY: z.string().optional(),
   EVIDENCE_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
 
+  /**
+   * Geography. `postal-code` is the offline estimate that has always been
+   * here; `osm` uses OpenStreetMap's Nominatim and OSRM, which are keyless
+   * and open but require an identifying User-Agent under their usage policy.
+   * Selecting `osm` without one is refused rather than silently ignored.
+   */
+  MAPS_PROVIDER: z.enum(["postal-code", "osm"]).default("postal-code"),
+  MAPS_USER_AGENT: z.string().min(8).max(200).optional(),
+  MAPS_NOMINATIM_URL: z.string().url().optional(),
+  MAPS_OSRM_URL: z.string().url().optional(),
+  MAPS_CACHE_TTL_MS: z.coerce.number().int().min(0).max(30 * 24 * 3600_000).default(7 * 24 * 3600_000),
+
   AI_PROVIDER: z.enum(["mock", "openai"]).default("mock")
 });
 
@@ -130,6 +142,15 @@ const configSchema = baseSchema
       if (value.WEB_ORIGIN === "*") {
         ctx.addIssue({ code: "custom", path: ["WEB_ORIGIN"], message: "WEB_ORIGIN may not be a wildcard" });
       }
+    }
+
+    if (value.MAPS_PROVIDER === "osm" && value.MAPS_USER_AGENT === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAPS_USER_AGENT"],
+        message:
+          "MAPS_PROVIDER=osm requires MAPS_USER_AGENT: Nominatim's usage policy needs an identifying agent with a contact, and a generic one gets the deployment blocked"
+      });
     }
 
     // A half-configured identity provider is worse than none: it would fall

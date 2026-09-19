@@ -3,8 +3,8 @@ import { z } from "zod";
 import { createOffersSchema, fallbackSchema, offerStatusSchema, respondToOfferSchema } from "@rescue/contracts";
 import { MINUTE_MS, type Clock } from "../lib/clock.js";
 import { AppError, notFound } from "../lib/errors.js";
-import { demandFromItems, rankProviders } from "../lib/eligibility.js";
-import { DispatchSweep, loadEligibilityProviders } from "../lib/dispatch.js";
+import type { MapsProvider } from "../lib/maps.js";
+import { DispatchSweep, rankForJob } from "../lib/dispatch.js";
 import { requireAuth, requireProvider, requireRole } from "../plugins/auth.js";
 import type { IdempotencyRunner } from "../plugins/idempotency.js";
 import type { Store, StoredOffer } from "../store/types.js";
@@ -14,6 +14,7 @@ export interface OfferRouteDeps {
   idempotency: IdempotencyRunner;
   clock: Clock;
   sweep: DispatchSweep;
+  maps: MapsProvider;
 }
 
 const jobIdParams = z.object({ id: z.string().uuid() });
@@ -43,18 +44,7 @@ export const offerRoutes =
       const job = await deps.store.findJob(id, auth.scope);
       if (!job) throw notFound("Job");
 
-      const demand = demandFromItems(job.items);
-      const results = rankProviders(
-        await loadEligibilityProviders(deps.store),
-        {
-          jobType: job.type,
-          pickupPostalCode: job.pickup.postalCode,
-          requiredVehicleClass: "SMALL_VAN",
-          ...demand
-        },
-        deps.clock.now()
-      );
-      return { data: results };
+      return { data: await rankForJob(deps.store, job, deps.clock.now(), deps.maps) };
     });
 
     /**
@@ -88,17 +78,7 @@ export const offerRoutes =
         );
       }
 
-      const demand = demandFromItems(job.items);
-      const ranked = rankProviders(
-        await loadEligibilityProviders(deps.store),
-        {
-          jobType: job.type,
-          pickupPostalCode: job.pickup.postalCode,
-          requiredVehicleClass: "SMALL_VAN",
-          ...demand
-        },
-        deps.clock.now()
-      );
+      const ranked = await rankForJob(deps.store, job, deps.clock.now(), deps.maps);
       const eligible = ranked.filter((result) => result.eligible).slice(0, input.maxProviders);
       if (eligible.length === 0) {
         throw new AppError(

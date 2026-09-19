@@ -6,15 +6,24 @@ import { ZodError } from "zod";
 import { config as defaultConfig, type Config } from "./config.js";
 import { systemClock, type Clock } from "./lib/clock.js";
 import { AppError } from "./lib/errors.js";
-import { RulesFirstTriageService, type TriageService } from "./lib/triage.js";
+import { type TriageService } from "./lib/triage.js";
+import { StubTriageModel, ValidatingTriageService } from "./lib/ai.js";
 import { MockEvidenceStorage, type EvidenceStorage } from "./lib/storage.js";
 import { DispatchSweep, type SweepConfig } from "./lib/dispatch.js";
+import {
+  CachingMaps,
+  OpenStreetMapMaps,
+  PostalCodeMaps,
+  type MapsProvider
+} from "./lib/maps.js";
 import {
   LoggingNotificationSender,
   type NotificationSender
 } from "./lib/notifications.js";
 import { buildHandlers } from "./worker/handlers.js";
-import { OutboxWorker } from "./worker/worker.js";
+import { buildPaymentHandlers } from "./worker/payments.js";
+import { MockPaymentGateway, type PaymentGateway } from "./lib/payments.js";
+import { composeHandlers, OutboxWorker } from "./worker/worker.js";
 import {
   DevTokenIssuer,
   DevTokenVerifier,
@@ -51,6 +60,8 @@ export interface BuildAppOptions {
   triage?: TriageService;
   storage?: EvidenceStorage;
   notifications?: NotificationSender;
+  gateway?: PaymentGateway;
+  maps?: MapsProvider;
   sweep?: Partial<SweepConfig>;
   clock?: Clock;
   verifier?: TokenVerifier;
@@ -109,8 +120,43 @@ export async function buildApp(options: BuildAppOptions = {}) {
   // DATABASE_URL selects PostgreSQL. Without it the in-memory store runs, which
   // `parseConfig` refuses to allow in production.
   const store = options.store ?? (await createStore(config));
-  const triage = options.triage ?? new RulesFirstTriageService();
-  const sweep = new DispatchSweep({ store, clock, config: options.sweep });
+  /**
+   * Triage always goes through validation, even with no model configured.
+   *
+   * With `AI_PROVIDER=mock` the "model" is a stub that answers with the rules
+   * engine's own output -- which means the validated path, the provenance
+   * record and the fallback are all exercised in every development run rather
+   * than only in production, where finding a bug in them is expensive.
+   */
+  const triage: TriageService =
+    options.triage ??
+    new ValidatingTriageService({
+      model: config.AI_PROVIDER === "mock" ? new StubTriageModel() : null,
+      clock,
+      onFallback: (reason, detail) => app.log.warn({ reason, detail }, "triage fell back to rules")
+    });
+  /**
+   * Geography.
+   *
+   * The real provider only when it is configured and identified: Nominatim's
+   * terms require a contactable User-Agent, and sending a generic one gets the
+   * deployment blocked rather than rate-limited. Everything is wrapped in the
+   * cache, which is how this stays inside those terms, and the cache falls
+   * back to the offline estimate when the provider is unreachable -- with the
+   * `isRoadDistance` flag false, so the degradation shows up in the console
+   * instead of being quietly presented as a measurement.
+   */
+  const maps: MapsProvider = options.maps ?? new CachingMaps(
+    config.MAPS_PROVIDER === "osm" && config.MAPS_USER_AGENT
+      ? new OpenStreetMapMaps({
+          userAgent: config.MAPS_USER_AGENT,
+          nominatimBase: config.MAPS_NOMINATIM_URL,
+          osrmBase: config.MAPS_OSRM_URL
+        })
+      : new PostalCodeMaps(),
+    { now: () => clock.now(), ttlMs: config.MAPS_CACHE_TTL_MS }
+  );
+  const sweep = new DispatchSweep({ store, clock, maps, config: options.sweep });
   const storage =
     options.storage ??
     new MockEvidenceStorage(
@@ -240,11 +286,18 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const systemActor = { userId: null, role: "DISPATCHER" as const, correlationId: "system" };
 
   const notifications = options.notifications ?? new LoggingNotificationSender(app.log);
+  const gateway = options.gateway ?? new MockPaymentGateway(config.JWT_SECRET);
   const worker = new OutboxWorker({
     store,
     clock,
     logger: app.log,
-    handlers: buildHandlers({ store, sender: notifications }),
+    // Notifications first: telling someone is cheap and safe to repeat, so a
+    // payment failure retries the message without having also delayed the
+    // email that should already have gone out.
+    handlers: composeHandlers(
+      buildHandlers({ store, sender: notifications }),
+      buildPaymentHandlers({ store, gateway })
+    ),
     actor: systemActor,
     pollIntervalMs: config.OUTBOX_POLL_MS,
     batchSize: config.OUTBOX_BATCH
@@ -282,7 +335,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
       await scoped.register(jobRoutes({ store, triage, idempotency }));
       await scoped.register(providerRoutes({ store, registrationHashKey: config.REGISTRATION_HASH_KEY }));
       await scoped.register(quoteRoutes({ store, idempotency, clock }));
-      await scoped.register(offerRoutes({ store, idempotency, clock, sweep }));
+      await scoped.register(offerRoutes({ store, idempotency, clock, sweep, maps }));
       await scoped.register(evidenceRoutes({ store, storage, clock }));
     },
     { prefix: "/v1" }

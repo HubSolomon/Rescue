@@ -4,6 +4,7 @@ import { createQuoteSchema, decideQuoteSchema, vatCents } from "@rescue/contract
 import { HOUR_MS } from "../lib/clock.js";
 import { AppError, notFound } from "../lib/errors.js";
 import { requireAuth, requireOrganization, requireRole } from "../plugins/auth.js";
+import { summariseLedger } from "../lib/payments.js";
 import type { IdempotencyRunner } from "../plugins/idempotency.js";
 import type { Clock } from "../lib/clock.js";
 import type { Store, StoredQuote } from "../store/types.js";
@@ -125,5 +126,25 @@ export const quoteRoutes =
           return { statusCode: 200, body: { data: { quote: publicQuote(quote), job } } };
         }
       });
+    });
+
+    /**
+     * The money on a job.
+     *
+     * Entries and the fold over them, in the same response: a reader should
+     * never have to add up a column themselves and risk getting a different
+     * answer from the one the system would give. Scoped through the job, so a
+     * customer sees their own and a provider sees the jobs it holds -- and,
+     * because the ledger records the payout as well as the charge, the numbers
+     * a provider can see are limited by the same scope rule as everything else.
+     */
+    app.get("/jobs/:id/ledger", async (request) => {
+      const auth = requireRole(request, "DISPATCHER", "COMPLIANCE", "ADMIN");
+      const { id } = jobIdParams.parse(request.params);
+      const entries = await deps.store.listLedger(id, auth.scope);
+      return {
+        data: entries.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
+        meta: summariseLedger(entries)
+      };
     });
   };

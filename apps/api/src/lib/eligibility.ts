@@ -51,6 +51,15 @@ export interface EligibilityProvider {
   status: ProviderStatus;
   /** The provider's own switch. Vetted and active is not the same as free. */
   acceptingWork: boolean;
+  /**
+   * A real road distance to this job, where one could be obtained.
+   *
+   * Resolved before ranking rather than inside it, so eligibility stays a pure
+   * synchronous function of stored facts -- the same inputs always produce the
+   * same ordered list, which is the property the whole gate rests on. Absent
+   * means fall back to the postal-code estimate below.
+   */
+  roadDistanceKm?: number;
   basePostalCode: string;
   serviceRadiusKm: number;
   serviceTypes: readonly JobType[];
@@ -170,7 +179,9 @@ export function evaluateProviderEligibility(
     reasons.push("SERVICE_TYPE_NOT_PERMITTED");
   }
 
-  const distanceKm = estimateDistanceKm(provider.basePostalCode, demand.pickupPostalCode);
+  // A measured distance when one was resolved, the offline estimate otherwise.
+  const distanceKm =
+    provider.roadDistanceKm ?? estimateDistanceKm(provider.basePostalCode, demand.pickupPostalCode);
   if (distanceKm > provider.serviceRadiusKm) {
     reasons.push("OUTSIDE_SERVICE_RADIUS");
   }
@@ -185,6 +196,7 @@ export function evaluateProviderEligibility(
     providerId: provider.id,
     eligible: reasons.length === 0,
     reasons,
+    distanceIsRoad: provider.roadDistanceKm !== undefined,
     rank: null,
     distanceKm
   };

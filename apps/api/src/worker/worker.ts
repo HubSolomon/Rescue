@@ -149,3 +149,33 @@ export class OutboxWorker {
     this.timer = null;
   }
 }
+
+/**
+ * Runs several registries' handlers for the same topic, in order.
+ *
+ * A job completing both notifies the customer and captures the money, and
+ * neither concern should have to know about the other. They share a message
+ * rather than each getting their own, because two rows for one event can
+ * disagree about whether the event happened.
+ *
+ * If any handler throws, the message is retried and *all* of them run again.
+ * That is why every handler is written to be safe to run twice, and why they
+ * are ordered cheapest-first: a notification that has already gone out is a
+ * duplicate email, while a payment that runs twice is a real problem, so the
+ * payment handlers guard on the ledger rather than on delivery.
+ */
+export function composeHandlers(...registries: HandlerRegistry[]): HandlerRegistry {
+  const composed: HandlerRegistry = {};
+  for (const registry of registries) {
+    for (const [topic, handler] of Object.entries(registry) as [OutboxTopic, OutboxHandler][]) {
+      const existing = composed[topic];
+      composed[topic] = existing
+        ? async (message, context) => {
+            await existing(message, context);
+            await handler(message, context);
+          }
+        : handler;
+    }
+  }
+  return composed;
+}

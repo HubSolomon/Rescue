@@ -61,7 +61,9 @@ test.describe("language", () => {
     await page.getByRole("link", { name: "English" }).click();
     await expect(page).toHaveURL(/\/en$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.getByText(/When logistics breaks/i)).toBeVisible();
+    // The heading specifically: Next's route announcer repeats the page title
+    // in a live region after a client navigation, so a text match finds two.
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/When logistics breaks/i);
   });
 });
 
