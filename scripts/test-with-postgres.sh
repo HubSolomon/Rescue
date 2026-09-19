@@ -77,6 +77,11 @@ echo "==> DATABASE_URL=postgresql://$DB_USER:***@localhost:$port/$SCRATCH_DB"
 echo "==> applying migrations"
 pnpm --filter @rescue/database exec prisma migrate deploy
 
+echo "==> provoking every constraint and trigger"
+# Before the suite, not after: if the schema does not enforce what it claims,
+# a green application suite is measuring the wrong layer.
+bash "$(dirname "$0")/check-database.sh"
+
 echo "==> running the API suite, PrismaStore included"
 pnpm --filter @rescue/api test
 

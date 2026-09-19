@@ -80,6 +80,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm --filter @rescue/database exec prisma migrate deploy
+      - name: Provoke every constraint and trigger
+        # Before the application suite. These are the rules PostgreSQL enforces
+        # regardless of which code reached it -- a migration, a support query,
+        # a second service. If they are missing, a green application suite is
+        # measuring the wrong layer.
+        run: pnpm check:db
       # The whole point of this job: the Prisma store is the half of the
       # conformance suite that skips itself everywhere else, so without this it
       # is the half that is never run.

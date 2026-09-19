@@ -88,12 +88,24 @@ pnpm test:db
 ```
 
 That starts the Postgres in `docker-compose.yml`, creates a scratch database,
-applies the migrations and runs the suite — every step inside the container, so
+applies the migrations, provokes every constraint and trigger, and runs the suite — every step inside the container, so
 the host needs Docker and nothing else. No local PostgreSQL, no `psql` on the
 PATH. If you would rather run your own server, the script prints the commands.
 
 The store conformance suite runs against both implementations, so the
 in-memory and PostgreSQL stores are held to identical behaviour.
+
+The constraint harness runs on its own too, against any scratch database:
+
+```bash
+DATABASE_URL=postgresql://localhost:5432/rescue_check pnpm check:db
+```
+
+Thirty-seven cases, each written so it would *succeed* if the rule were
+missing: every CHECK constraint, every append-only trigger, the `TRUNCATE`
+guards, and two concurrent sessions proving `FOR UPDATE SKIP LOCKED` hands out
+disjoint batches. It asks what the application suite cannot — whether
+PostgreSQL still refuses when something reaches it another way.
 
 ```bash
 pnpm scan:secrets

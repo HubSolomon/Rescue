@@ -14,6 +14,7 @@
     "test:e2e": "pnpm --filter @rescue/web build && pnpm --filter @rescue/web test:e2e",
     "test:db": "bash scripts/test-with-postgres.sh",
     "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check:db": "bash scripts/check-database.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",
