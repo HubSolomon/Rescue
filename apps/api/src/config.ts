@@ -144,9 +144,25 @@ const configSchema = baseSchema
 
 export type Config = z.infer<typeof configSchema>;
 
+/**
+ * An environment variable set to the empty string means "not set".
+ *
+ * `.env` templates, docker-compose defaults and CI runners all routinely
+ * produce `FOO=`. Without this, `DATABASE_URL=` in a copied `.env.example`
+ * fails `min(1)` and the process refuses to boot with a confusing message
+ * about a field the operator deliberately left blank.
+ */
+function blankAsUnset(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const cleaned: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== "") cleaned[key] = value;
+  }
+  return cleaned;
+}
+
 /** Exported for tests; production code should use the `config` singleton. */
 export function parseConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  return configSchema.parse(env);
+  return configSchema.parse(blankAsUnset(env));
 }
 
 export const config = parseConfig();

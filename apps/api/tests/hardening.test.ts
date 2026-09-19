@@ -154,3 +154,21 @@ describe("rate limiting (H1, H2)", () => {
     expect(statuses.filter((status) => status === 429).length).toBe(4);
   });
 });
+
+describe("empty environment variables mean unset", () => {
+  it("treats DATABASE_URL= as absent rather than invalid", () => {
+    // `cp .env.example .env` produces exactly this.
+    expect(() => parseConfig({ DATABASE_URL: "" })).not.toThrow();
+    expect(parseConfig({ DATABASE_URL: "" }).DATABASE_URL).toBeUndefined();
+  });
+
+  it("treats blank secrets and URLs as absent", () => {
+    const config = parseConfig({ JWT_SECRET: "", OIDC_ISSUER: "", REGISTRATION_HASH_KEY: "" });
+    expect(config.jwtSecretIsEphemeral).toBe(true);
+    expect(config.usesOidc).toBe(false);
+  });
+
+  it("still refuses production when the required values are blank", () => {
+    expect(() => parseConfig({ ...PRODUCTION_ENV, OIDC_ISSUER: "", OIDC_JWKS_URI: "" })).toThrow();
+  });
+});

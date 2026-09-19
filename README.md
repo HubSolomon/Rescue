@@ -21,9 +21,12 @@ run the API in development — it falls back to an in-memory store.
 corepack enable
 cp .env.example .env
 pnpm install
-pnpm db:generate
 pnpm dev
 ```
+
+`prisma generate` and the workspace package builds run automatically as
+prerequisites of `dev`, `test`, `lint`, `typecheck` and `build`, so there is no
+ordering to remember and no "works from the repo root only" failure mode.
 
 Open `http://localhost:3000`. The API health endpoint is
 `http://localhost:4000/v1/health` and the generated OpenAPI document is at
