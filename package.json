@@ -10,6 +10,7 @@
     "lint": "pnpm build:packages && pnpm -r lint",
     "typecheck": "pnpm build:packages && pnpm --filter @rescue/api typecheck && pnpm --filter @rescue/web typecheck",
     "test": "pnpm build:packages && pnpm -r test",
+    "e2e:install": "pnpm --filter @rescue/web exec playwright install chromium",
     "test:e2e": "pnpm --filter @rescue/web build && pnpm --filter @rescue/web test:e2e",
     "test:db": "bash scripts/test-with-postgres.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",

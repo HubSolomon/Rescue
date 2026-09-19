@@ -94,6 +94,20 @@ PATH. If you would rather run your own server, the script prints the commands.
 The store conformance suite runs against both implementations, so the
 in-memory and PostgreSQL stores are held to identical behaviour.
 
+The browser journeys need a browser, and Playwright downloads its own rather
+than using the one on your machine. Once per checkout:
+
+```bash
+pnpm e2e:install
+pnpm test:e2e
+```
+
+`pnpm test:e2e` builds the web app, then starts the API and the web server on
+ports 4100 and 3100 and drives the three consoles through thirteen journeys on
+desktop Chromium and a Pixel 7. Those ports must be free — a `pnpm dev` left
+running elsewhere uses 4000 and 3000, so the two do not collide, but a previous
+end-to-end run that was killed mid-way can.
+
 ## Security boundary
 
 AI may suggest item classifications, vehicle requirements and providers. It
