@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "pnpm --filter @rescue/contracts build",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "pretest": "pnpm --filter @rescue/contracts build",
     "test": "vitest run",
+    "pretest:e2e": "pnpm --filter @rescue/contracts build",
     "test:e2e": "playwright test"
   },
   "dependencies": {
