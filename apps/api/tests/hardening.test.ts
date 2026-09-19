@@ -1,28 +1,40 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
+import { buildApp, buildVerifier } from "../src/app.js";
 import { parseConfig } from "../src/config.js";
+import { testConfig } from "./helpers.js";
 
 const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-describe("config: JWT_SECRET (H3)", () => {
+/** A production environment with every required value present. */
+const PRODUCTION_ENV = {
+  NODE_ENV: "production",
+  OIDC_ISSUER: "https://idp.example.com",
+  OIDC_JWKS_URI: "https://idp.example.com/.well-known/jwks.json",
+  REGISTRATION_HASH_KEY: "a-production-registration-key-long-enough",
+  DATABASE_URL: "postgresql://rescue@db:5432/rescue",
+  STORAGE_PROVIDER: "s3"
+} as const;
+
+describe("secrets (H3)", () => {
   it("rejects the placeholder that shipped in config.ts", () => {
-    expect(() => parseConfig({ JWT_SECRET: "development-only-secret-change-me-now" })).toThrow(/placeholder/i);
+    expect(() => parseConfig({ JWT_SECRET: "development-only-secret-change-me-now" })).toThrow(
+      /placeholder/i
+    );
   });
 
   it("rejects the placeholder that ships in .env.example", () => {
-    expect(() => parseConfig({ JWT_SECRET: "replace-with-at-least-32-random-characters" })).toThrow(/placeholder/i);
+    expect(() => parseConfig({ JWT_SECRET: "replace-with-at-least-32-random-characters" })).toThrow(
+      /placeholder/i
+    );
   });
 
-  it("refuses to start in production without a secret", () => {
-    expect(() => parseConfig({ NODE_ENV: "production" })).toThrow(/must be set in production/i);
-  });
-
-  it("starts in production with a real secret", () => {
-    const secret = "S6m0aGJ3xQ2pR8vL1nT4dYw7KzB5cF9hUeA0iOqXjMrN";
-    expect(parseConfig({ NODE_ENV: "production", JWT_SECRET: secret }).JWT_SECRET).toBe(secret);
+  it("rejects a placeholder used as the registration hash key", () => {
+    expect(() =>
+      parseConfig({ REGISTRATION_HASH_KEY: "development-only-secret-change-me-now" })
+    ).toThrow(/placeholder/i);
   });
 
   it("generates a distinct ephemeral secret per process in development", () => {
@@ -34,7 +46,60 @@ describe("config: JWT_SECRET (H3)", () => {
   });
 });
 
-describe("config: network exposure (H6, H1)", () => {
+describe("production refuses to boot half-configured", () => {
+  it("accepts a fully configured production environment", () => {
+    const config = parseConfig(PRODUCTION_ENV);
+    expect(config.usesOidc).toBe(true);
+    expect(config.devIdentityEnabled).toBe(false);
+  });
+
+  it.each([
+    ["OIDC_ISSUER", /identity provider/i],
+    ["REGISTRATION_HASH_KEY", /REGISTRATION_HASH_KEY/],
+    ["DATABASE_URL", /DATABASE_URL/],
+    ["STORAGE_PROVIDER", /does not store anything/]
+  ])("refuses production without %s", (field, message) => {
+    const env: Record<string, string> = { ...PRODUCTION_ENV };
+    delete env[field];
+    if (field === "OIDC_ISSUER") delete env.OIDC_JWKS_URI;
+    if (field === "STORAGE_PROVIDER") env.STORAGE_PROVIDER = "mock";
+    expect(() => parseConfig(env)).toThrow(message);
+  });
+
+  it("refuses a half-configured identity provider", () => {
+    expect(() => parseConfig({ OIDC_ISSUER: "https://idp.example.com" })).toThrow(/must be set together/);
+    expect(() =>
+      parseConfig({ OIDC_JWKS_URI: "https://idp.example.com/.well-known/jwks.json" })
+    ).toThrow(/must be set together/);
+  });
+
+  it("refuses a wildcard CORS origin in production", () => {
+    expect(() => parseConfig({ ...PRODUCTION_ENV, WEB_ORIGIN: "*" })).toThrow();
+  });
+
+  it("will not construct the symmetric dev verifier in production", () => {
+    const config = parseConfig({ ...PRODUCTION_ENV });
+    // With OIDC configured it builds the real one...
+    expect(buildVerifier(config).kind).toBe("oidc");
+    // ...and without it, it refuses rather than silently downgrading.
+    const broken = { ...config, usesOidc: false } as typeof config;
+    expect(() => buildVerifier(broken)).toThrow(/Refusing to start/);
+  });
+
+  it("disables the development token endpoint outside development", () => {
+    expect(parseConfig({ NODE_ENV: "development" }).devIdentityEnabled).toBe(true);
+    expect(parseConfig({ ...PRODUCTION_ENV }).devIdentityEnabled).toBe(false);
+    // A real IdP disables it even in development.
+    expect(
+      parseConfig({
+        OIDC_ISSUER: "https://idp.example.com",
+        OIDC_JWKS_URI: "https://idp.example.com/jwks"
+      }).devIdentityEnabled
+    ).toBe(false);
+  });
+});
+
+describe("network exposure (H6, H1)", () => {
   it("binds loopback by default", () => {
     expect(parseConfig({}).API_HOST).toBe("127.0.0.1");
   });
@@ -54,7 +119,7 @@ describe("config: network exposure (H6, H1)", () => {
 
 describe("rate limiting (H1, H2)", () => {
   it("returns 429 with the documented error envelope, not 500", async () => {
-    const app = await buildApp({ rateLimitMax: 2 });
+    const app = await buildApp({ config: testConfig(), rateLimitMax: 2 });
     apps.push(app);
     await app.listen({ port: 0, host: "127.0.0.1" });
     const address = app.server.address();
@@ -68,13 +133,12 @@ describe("rate limiting (H1, H2)", () => {
     expect(statuses.slice(2)).toEqual([429, 429]);
 
     const throttled = await fetch(base);
-    expect(throttled.status).toBe(429);
     expect(throttled.headers.get("retry-after")).not.toBeNull();
     expect((await throttled.json()).error.code).toBe("RATE_LIMITED");
   });
 
   it("cannot be bypassed by spoofing X-Forwarded-For", async () => {
-    const app = await buildApp({ rateLimitMax: 2 });
+    const app = await buildApp({ config: testConfig(), rateLimitMax: 2 });
     apps.push(app);
     await app.listen({ port: 0, host: "127.0.0.1" });
     const address = app.server.address();
@@ -85,7 +149,6 @@ describe("rate limiting (H1, H2)", () => {
     for (let i = 0; i < 6; i++) {
       statuses.push((await fetch(base, { headers: { "x-forwarded-for": `203.0.113.${i}` } })).status);
     }
-
     // Before the fix every one of these returned 200, because each spoofed
     // address got its own bucket.
     expect(statuses.filter((status) => status === 429).length).toBe(4);

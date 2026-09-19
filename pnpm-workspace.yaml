@@ -1,14 +1,21 @@
 packages:
   - apps/*
   - packages/*
-onlyBuiltDependencies:
-  - "@prisma/client"
-  - "@prisma/engines"
-  - esbuild
-  - prisma
-  - sharp
+
+# Only these packages may run install scripts. `sharp` was listed before but is
+# not a dependency of anything here, so it has been removed (finding L1).
+# pnpm 11 reads `allowBuilds`; the duplicate `onlyBuiltDependencies` list that
+# used to sit alongside it has been dropped (finding L2).
 allowBuilds:
-  '@prisma/client': true
-  '@prisma/engines': true
+  "@prisma/client": true
+  "@prisma/engines": true
   esbuild: true
   prisma: true
+
+# Pull transitive dependencies up to patched versions. Each entry is a security
+# advisory, not a preference; see docs/audits/PHASE_2_BACKEND.md.
+overrides:
+  # Path-traversal and XSS advisories in the CSS pipeline, reached via Next.js.
+  postcss: "^8.5.23"
+  # Stack exhaustion on recursive object graphs, reached via the Prisma CLI.
+  deepmerge-ts: "^8.0.0"

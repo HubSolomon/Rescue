@@ -13,10 +13,15 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",
-    "db:studio": "pnpm --filter @rescue/database studio"
+    "db:studio": "pnpm --filter @rescue/database studio",
+    "db:deploy": "pnpm --filter @rescue/database exec prisma migrate deploy"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22.13.0",
+    "pnpm": ">=11.19.0"
   }
 }

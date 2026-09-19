@@ -1,31 +1,107 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildApp } from "../src/app.js";
+import { harness, idem, SUBJECTS, VALID_JOB, type Harness } from "./helpers.js";
 
-const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
-afterEach(async () => { await Promise.all(apps.splice(0).map((app) => app.close())); });
+/**
+ * Smoke tests for the application shell: health, envelopes, correlation ids
+ * and the not-found handler. Domain behaviour lives in the focused suites.
+ */
 
-describe("RESCUE API", () => {
-  it("reports health", async () => {
-    const app = await buildApp(); apps.push(app);
-    const response = await app.inject({ method: "GET", url: "/v1/health" });
-    expect(response.statusCode).toBe(200); expect(response.json().status).toBe("ok");
+let open: Harness | null = null;
+afterEach(async () => {
+  await open?.close();
+  open = null;
+});
+async function boot() {
+  open = await harness();
+  return open;
+}
+
+describe("application shell", () => {
+  it("reports health without credentials", async () => {
+    const h = await boot();
+    const response = await h.app.inject({ method: "GET", url: "/v1/health" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe("ok");
   });
 
-  it("creates a job and returns human-reviewed triage", async () => {
-    const app = await buildApp(); apps.push(app);
-    const response = await app.inject({ method: "POST", url: "/v1/jobs", payload: {
-      organizationId: "22222222-2222-4222-8222-222222222222", type: "FAILED_DELIVERY", urgency: "SAME_DAY",
-      pickup: { line1: "Am Markt 1", postalCode: "28195", city: "Bremen", countryCode: "DE" },
-      destination: { line1: "Parkallee 10", postalCode: "28209", city: "Bremen", countryCode: "DE" },
-      items: [{ name: "Sofa", quantity: 1, estimatedWeightKg: 85 }], stairs: 2, liftAvailable: false
-    }});
+  it("reports readiness with a dependency check", async () => {
+    const h = await boot();
+    const response = await h.app.inject({ method: "GET", url: "/v1/ready" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().checks.store).toBe("ok");
+  });
+
+  it("creates a job and returns an advisory triage suggestion", async () => {
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), ...idem() },
+      payload: VALID_JOB
+    });
     expect(response.statusCode).toBe(201);
-    const body=response.json(); expect(body.data.job.status).toBe("DRAFT"); expect(body.data.triage.requiresHumanApproval).toBe(true);
+    expect(response.json().data.job.status).toBe("DRAFT");
+    expect(response.json().data.triage.requiresHumanApproval).toBe(true);
   });
 
   it("rejects an invalid German postal code", async () => {
-    const app = await buildApp(); apps.push(app);
-    const response = await app.inject({ method: "POST", url: "/v1/jobs", payload: { organizationId: "bad", type: "FAILED_DELIVERY", urgency: "URGENT", pickup: { line1: "X", postalCode: "28", city: "B" }, items: [] } });
-    expect(response.statusCode).toBe(400); expect(response.json().error.code).toBe("VALIDATION_ERROR");
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), ...idem() },
+      payload: { ...VALID_JOB, pickup: { ...VALID_JOB.pickup, postalCode: "28" } }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns field paths in validation errors but not the submitted values", async () => {
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), ...idem() },
+      payload: { ...VALID_JOB, pickup: { ...VALID_JOB.pickup, postalCode: "SECRET-VALUE" } }
+    });
+    const body = JSON.stringify(response.json());
+    expect(body).toContain("pickup.postalCode");
+    // The rejected input is not echoed back (finding L3).
+    expect(body).not.toContain("SECRET-VALUE");
+  });
+
+  it("answers 401 before 404, so anonymous callers cannot map the route table", async () => {
+    const h = await boot();
+    const response = await h.app.inject({ method: "GET", url: "/v1/nope" });
+    // Returning 404 here would tell an unauthenticated prober which paths
+    // exist. Authentication is checked first, on purpose.
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("uses the documented error envelope for unknown routes once authenticated", async () => {
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/v1/nope",
+      headers: await h.auth(SUBJECTS.dispatcher)
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe("NOT_FOUND");
+  });
+
+  it("echoes a correlation id back on every response", async () => {
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/v1/health",
+      headers: { "x-request-id": "corr-123" }
+    });
+    expect(response.headers["x-request-id"]).toBe("corr-123");
+  });
+
+  it("generates a correlation id when the client does not send one", async () => {
+    const h = await boot();
+    const response = await h.app.inject({ method: "GET", url: "/v1/health" });
+    expect(response.headers["x-request-id"]).toBeTruthy();
   });
 });
