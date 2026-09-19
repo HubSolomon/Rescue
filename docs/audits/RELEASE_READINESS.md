@@ -93,14 +93,30 @@ and no amount of reading would have found it. The drill did.
 | API | 314 passing, 3 skipped |
 | Web | 51 passing |
 | End-to-end | 26 passing — 13 journeys × desktop Chromium and Pixel 7 |
-| Secret scan | clean, 160 files |
+| Database invariants | 37 checks, 0 failed, against PostgreSQL 16.13 |
+| Secret scan | clean, 165 files |
 | Typecheck, lint, build | clean |
 
 Skipped: `PrismaStore` conformance, and two live map checks.
 
-Executed against real PostgreSQL 16.13 this phase: all five migrations; the new
-truncate guard, direct and by cascade; a full `pg_dump` / `pg_restore` cycle
-with 17 tables, 8 triggers and ledger amounts exact after restore.
+The 37 database checks are `scripts/check-database.sh`, and they ask a question
+the application suite cannot. Those 314 tests pass against the in-memory store,
+which enforces the rules in TypeScript; this asks whether PostgreSQL still
+refuses when something reaches it another way — a migration, a support query, a
+second service. Every case is written so it would *succeed* if the rule were
+missing: 13 CHECK constraints, 8 append-only triggers, the 4 `TRUNCATE` guards
+and the cascade from `Job`, the outbox's delivered-iff-sent pair, and the legal
+cases too, because a constraint that also blocks correct behaviour is a bug a
+refusal-only suite never finds.
+
+The concurrency case is two real sessions: the second claims while the first
+still holds its lock, and they must come back disjoint. They did — `c1 c2 c3`
+against `c4 c5 c6`. If `FOR UPDATE SKIP LOCKED` were wrong, every notification
+would go out twice and nothing else here would notice.
+
+Also executed against real PostgreSQL 16.13: all five migrations, and a full
+`pg_dump` / `pg_restore` cycle with 17 tables, 8 triggers and ledger amounts
+exact after restore.
 
 ## 4. What is not done
 
@@ -128,10 +144,15 @@ rounds, then hand it to a human — logs to a null recipient, because there is n
 on-call address in the system. Alert on
 `rescue_dispatch_sweep_actions_total{action="escalated"}` in the meantime.
 
-**6. `PrismaStore` has still never run here.** The container cannot reach
-`binaries.prisma.sh`, so the query engine cannot be fetched. `pnpm test:db`
-runs it on any machine with Docker, and the new CI job runs it on every push —
-which is the real fix, because it stops depending on anyone remembering.
+**6. `PrismaStore` has still never executed, anywhere.** Not a lack of trying:
+`binaries.prisma.sh` is refused by the proxy in both environments available
+here, the `@prisma/engines` npm package is 23 KB of postinstall script rather
+than the binary, and the only engine in reach is a macOS one that a Linux
+container cannot load. So the schema layer is now verified in depth and the
+adapter that talks to it is verified not at all — the 37 checks prove the SQL
+is right, not that Prisma emits it. `pnpm test:db` closes this on any machine
+with Docker, and the CI database job closes it on every pull request, which is
+the real fix because it stops depending on anyone remembering.
 
 **7. No load test.** None of the numbers in the incident runbook have a known
 normal, so "climbing" is a judgement call.
