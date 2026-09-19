@@ -293,3 +293,134 @@ describe("role gates", () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe("provider scope: assigned jobs are visible, nothing else is", () => {
+  it("a provider sees no jobs before being assigned one", async () => {
+    const h = await boot();
+    await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), ...idem() },
+      payload: VALID_JOB
+    });
+    const response = await h.app.inject({
+      method: "GET",
+      url: "/v1/jobs",
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toEqual([]);
+  });
+
+  it("a provider sees the job once it holds the assignment", async () => {
+    const h = await boot();
+    const { jobThroughToAssigned } = await import("./helpers.js");
+    const { jobId } = await jobThroughToAssigned(h);
+
+    const list = await h.app.inject({
+      method: "GET",
+      url: "/v1/jobs",
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+    expect(list.json().data.map((job: { id: string }) => job.id)).toContain(jobId);
+
+    const detail = await h.app.inject({
+      method: "GET",
+      url: `/v1/jobs/${jobId}`,
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+    expect(detail.statusCode).toBe(200);
+  });
+
+  it("a different provider still cannot see it", async () => {
+    const h = await boot();
+    const { jobThroughToAssigned } = await import("./helpers.js");
+    const { jobId } = await jobThroughToAssigned(h);
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/jobs/${jobId}`,
+      headers: await h.auth(SUBJECTS.providerRoland)
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("a provider cannot read what the customer was charged", async () => {
+    const h = await boot();
+    const { jobThroughToAssigned } = await import("./helpers.js");
+    const { jobId } = await jobThroughToAssigned(h);
+    // The provider knows its payout; the customer's price is not its business.
+    const response = await h.app.inject({
+      method: "GET",
+      url: `/v1/jobs/${jobId}/quotes`,
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+    expect(response.json().data).toEqual([]);
+  });
+});
+
+/**
+ * A POST that carries no body is a normal request, not a malformed one.
+ *
+ * `/start`, `/complete` and evidence confirmation take nothing at all. Fastify's
+ * default JSON parser rejects an empty body with FST_ERR_CTP_EMPTY_JSON_BODY as
+ * soon as the client declares `content-type: application/json`, which every
+ * HTTP client does by habit. The web app hit exactly that: the provider pressed
+ * "Abholung starten", the API answered 400, and the job silently never left
+ * ASSIGNED.
+ */
+describe("a bodyless POST is not a protocol error", () => {
+  it("accepts content-type: application/json with an empty body", async () => {
+    const h = await boot();
+    const { jobThroughToAssigned } = await import("./helpers.js");
+    const { jobId } = await jobThroughToAssigned(h);
+
+    const response = await h.app.inject({
+      method: "POST",
+      url: `/v1/jobs/${jobId}/start`,
+      headers: { ...(await h.auth(SUBJECTS.providerHansa)), "content-type": "application/json" },
+      payload: ""
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.status).toBe("IN_PROGRESS");
+  });
+
+  it("accepts no content-type at all", async () => {
+    const h = await boot();
+    const { jobThroughToAssigned } = await import("./helpers.js");
+    const { jobId } = await jobThroughToAssigned(h);
+
+    const response = await h.app.inject({
+      method: "POST",
+      url: `/v1/jobs/${jobId}/start`,
+      headers: await h.auth(SUBJECTS.providerHansa)
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("still rejects a body that is not valid JSON", async () => {
+    const h = await boot();
+    const response = await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), "content-type": "application/json" },
+      payload: "{not json"
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("an endpoint that needs a body still validates it", async () => {
+    const h = await boot();
+    // Empty body parses to {}, which Zod then refuses -- a validation error
+    // with field detail, not an opaque parser error.
+    const response = await h.app.inject({
+      method: "POST",
+      url: "/v1/jobs",
+      headers: { ...(await h.auth(SUBJECTS.customerAdmin)), "content-type": "application/json" },
+      payload: ""
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("VALIDATION_ERROR");
+  });
+});

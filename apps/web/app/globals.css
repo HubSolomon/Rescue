@@ -43,5 +43,139 @@ textarea { min-height:110px; resize:vertical; }
 .error { color:#b42318; font-size:13px; }
 .success { padding:16px; border-radius:12px; background:#eaf7f1; color:#087a50; }
 .footer { padding:35px 0; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
-@media (max-width:850px) { .hero-grid,.grid3,.form-grid { grid-template-columns:1fr; } .dashboard-grid { grid-template-columns:1fr 1fr; } .nav-links a:not(.button) { display:none; } }
+/* The provider console is used on a phone, in a van. Hiding the navigation
+   below 850px left that user with no way to reach their fleet, their jobs or
+   the language toggle, so the bar wraps onto a second line instead. */
+@media (max-width:850px) {
+  .hero-grid,.grid3,.form-grid { grid-template-columns:1fr; }
+  .dashboard-grid { grid-template-columns:1fr 1fr; }
+  .nav-inner { flex-wrap:wrap; gap:10px 16px; padding:12px 0; }
+  .nav-links { flex-wrap:wrap; gap:12px 16px; row-gap:10px; width:100%; justify-content:flex-start; }
+  .nav-links .who { margin-left:auto; }
+}
 @media (max-width:520px) { .dashboard-grid { grid-template-columns:1fr; } .hero { padding-top:54px; } }
+
+/* ---------------------------------------------------------- Phase 3 shell */
+
+/* Visible focus on every interactive element. The default outline is removed
+   by nothing here on purpose: keyboard users need to see where they are. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid #0b6bcb;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Hidden until focused, then the first thing a keyboard user reaches. */
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 50;
+  background: var(--navy); color: #fff; padding: 10px 16px; border-radius: 0 0 10px 10px;
+  transition: top .15s ease;
+}
+.skip-link:focus { top: 0; }
+
+.shell.narrow { width: min(720px, calc(100% - 32px)); }
+
+.page-header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+.page-header .lead { font-size: 16px; margin: 6px 0 0; }
+.page-header h2 { margin: 6px 0 0; }
+
+.stack { display: grid; gap: 18px; align-content: start; }
+.two-col { display: grid; grid-template-columns: 1.4fr .9fr; gap: 18px; align-items: start; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.numeric { font-variant-numeric: tabular-nums; }
+
+.linklike { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; text-decoration: underline; font-size: 14px; }
+.who { display: inline-flex; align-items: center; gap: 10px; }
+.who-name { font-weight: 700; color: var(--navy); font-size: 14px; }
+.locale-toggle { text-decoration: underline; }
+
+.callout { background: #fff7e6; border: 1px solid #f0d089; border-left-width: 4px; padding: 12px 14px; border-radius: 10px; color: #7a5200; }
+
+/* ----------------------------------------------------------------- states */
+
+.state { text-align: center; padding: 42px 22px; border: 1px dashed var(--line); border-radius: 16px; background: #fff; }
+.state h3 { margin-bottom: 6px; }
+.state-error { border-style: solid; border-color: #f0b3ac; background: #fff5f4; color: #7a1c13; }
+.state-error h3 { color: #7a1c13; }
+
+.skeleton-group { display: grid; gap: 12px; }
+.skeleton { height: 58px; border-radius: 12px; background: linear-gradient(90deg, #eef2f5 25%, #e2e9ee 37%, #eef2f5 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+.skeleton-title { height: 34px; width: 40%; }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* ------------------------------------------------------------------ lists */
+
+.job-list, .offer-list, .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.job-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.job-row:hover { border-color: var(--green); }
+.job-row-main { display: grid; gap: 2px; }
+.job-row-meta { display: flex; align-items: center; gap: 12px; }
+.plain-list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.plain-list li:last-child { border-bottom: 0; }
+
+.definitions { display: grid; gap: 10px; margin: 0; }
+.definitions > div { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
+.definitions dt { color: var(--muted); font-size: 14px; }
+.definitions dd { margin: 0; }
+
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.timeline li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }
+.timeline-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); margin-top: 6px; }
+.timeline strong { display: block; font-size: 14px; }
+
+.eligibility li { padding: 12px 0; }
+.eligibility-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.eligibility .reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.is-eligible { background: #f6fcf9; border-radius: 10px; padding-inline: 10px; }
+
+.offer-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+
+/* ----------------------------------------------------------------- badges */
+/* Every tone pairs colour with its own text, so colour never carries meaning
+   alone. Contrast checked against white at 4.5:1 or better. */
+.badge.tone-neutral { background: #eceff2; color: #3c4a57; }
+.badge.tone-info    { background: #e6f0fb; color: #0b4a86; }
+.badge.tone-progress{ background: #fff2dc; color: #7a4d00; }
+.badge.tone-good    { background: #eaf7f1; color: #0a6b47; }
+.badge.tone-bad     { background: #fdecea; color: #8a1c11; }
+.badge.tone-muted   { background: #f1f3f5; color: #55606b; }
+
+/* ------------------------------------------------------------------ forms */
+
+.accounts { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; }
+.account { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; font-weight: 500; }
+.account:has(input:checked) { border-color: var(--green); background: #f6fcf9; }
+.account span { display: grid; }
+.account .muted { font-weight: 400; font-size: 13px; }
+.account input { width: auto; }
+
+.checkbox { display: flex; flex-direction: row; align-items: center; gap: 10px; font-weight: 500; }
+.checkbox input { width: auto; }
+
+fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 8px; }
+legend { font-weight: 800; color: var(--navy); font-size: 14px; padding-inline: 6px; }
+
+.inline-form { gap: 12px; margin-top: 14px; }
+button[disabled] { opacity: .55; cursor: not-allowed; }
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: #b42318; }
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr; }
+  .definitions > div { grid-template-columns: 1fr; gap: 2px; }
+}
+@media (max-width: 560px) {
+  .page-header { flex-direction: column; }
+  .job-row { flex-direction: column; align-items: flex-start; }
+  .job-row-meta { flex-wrap: wrap; }
+  .shell, .shell.narrow { width: calc(100% - 32px); }
+}

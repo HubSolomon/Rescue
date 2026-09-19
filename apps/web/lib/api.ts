@@ -1,70 +1,140 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-
-export interface ApiError extends Error {
-  code?: string;
-  status?: number;
-}
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { readSessionToken } from "./session";
 
 /**
- * Minimal API client.
+ * Server-side API client.
  *
- * The full role-aware session handling is Phase 3. What matters here is that
- * the client can no longer name its own tenant: the API derives the
- * organisation from the token, and there is no field to send.
+ * Every call runs on the server with the token from the httpOnly cookie, so
+ * the browser never holds a credential. Idempotency keys are generated here
+ * rather than in the browser, which means a double-submitted form replays the
+ * stored response instead of creating a second job.
  */
-export async function apiRequest<T>(
-  path: string,
-  init: RequestInit & { token?: string; idempotencyKey?: string } = {}
-): Promise<T> {
-  const { token, idempotencyKey, ...rest } = init;
 
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    ...(rest.headers as Record<string, string> | undefined)
-  };
-  if (token) headers.authorization = `Bearer ${token}`;
-  if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
+const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
 
-  const response = await fetch(`${API_URL}${path}`, { ...rest, headers });
+/** Error codes the API documents. Mapped to localised copy in `i18n`. */
+export class ApiError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message: string,
+    public readonly details?: unknown
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
 
-  // A gateway error page is not JSON. Parsing it blindly produced an opaque
-  // "Unexpected token" for the user (finding L4).
+export interface RequestOptions {
+  method?: "GET" | "POST";
+  body?: unknown;
+  /** Set for mutations. Generated automatically when omitted. */
+  idempotencyKey?: string;
+  /** GET responses are not cached by default: this data changes constantly. */
+  revalidate?: number | false;
+  /** Bypass the session cookie, for the sign-in exchange itself. */
+  anonymous?: boolean;
+}
+
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const method = options.method ?? "GET";
+  const headers: Record<string, string> = {};
+
+  // Only declare a JSON body when there is one. Declaring `application/json`
+  // and then sending nothing is what a strict server (Fastify) rejects with
+  // FST_ERR_CTP_EMPTY_JSON_BODY, and several of our actions -- start,
+  // complete, evidence confirmation -- are deliberately bodyless.
+  if (options.body !== undefined) headers["content-type"] = "application/json";
+
+  if (!options.anonymous) {
+    const token = await readSessionToken();
+    if (!token) throw new ApiError("UNAUTHENTICATED", 401, "No session");
+    headers.authorization = `Bearer ${token}`;
+  }
+  if (method === "POST") {
+    headers["idempotency-key"] = options.idempotencyKey ?? randomUUID();
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      cache: "no-store",
+      ...(options.revalidate !== undefined && options.revalidate !== false
+        ? { next: { revalidate: options.revalidate } }
+        : {})
+    });
+  } catch {
+    // A connection failure is not an API error with a code; it needs its own
+    // message so the user is told the API is down rather than "unknown error".
+    throw new ApiError("NETWORK", 0, "The API is unreachable");
+  }
+
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
-    const error: ApiError = new Error(
-      response.ok ? "The server returned an unexpected response." : `Request failed (${response.status}).`
-    );
-    error.status = response.status;
-    throw error;
+    throw new ApiError("UNKNOWN", response.status, `Unexpected ${response.status} response`);
   }
 
-  const body = await response.json();
+  const payload = (await response.json()) as
+    | { data: T; meta?: unknown }
+    | { error: { code: string; message: string; details?: unknown } };
+
   if (!response.ok) {
-    const error: ApiError = new Error(body?.error?.message ?? "Request failed");
-    error.code = body?.error?.code;
-    error.status = response.status;
-    throw error;
+    const error = "error" in payload ? payload.error : undefined;
+    throw new ApiError(
+      error?.code ?? "UNKNOWN",
+      response.status,
+      error?.message ?? "Request failed",
+      error?.details
+    );
   }
-  return body as T;
+  return (payload as { data: T }).data;
 }
 
-/**
- * Development sign-in.
- *
- * Exchanges a seeded subject for a token via the API's development identity
- * provider. That endpoint does not exist in production, and this helper is
- * replaced by a real OIDC session in Phase 3. It exists so the request flow is
- * exercisable end to end today.
- */
-export async function devSignIn(subject: string): Promise<string> {
-  const response = await apiRequest<{ data: { accessToken: string } }>("/v1/auth/dev-token", {
+export const api = {
+  get: <T>(path: string, options?: Omit<RequestOptions, "method" | "body">) =>
+    request<T>(path, { ...options, method: "GET" }),
+  post: <T>(path: string, body?: unknown, options?: Omit<RequestOptions, "method" | "body">) =>
+    request<T>(path, { ...options, method: "POST", body })
+};
+
+/** Also returns `meta`, for paginated list endpoints. */
+export async function getWithMeta<T>(
+  path: string
+): Promise<{ data: T; meta?: { nextCursor?: string | null } }> {
+  const token = await readSessionToken();
+  if (!token) throw new ApiError("UNAUTHENTICATED", 401, "No session");
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      headers: { authorization: `Bearer ${token}` },
+      cache: "no-store"
+    });
+  } catch {
+    throw new ApiError("NETWORK", 0, "The API is unreachable");
+  }
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new ApiError(
+      payload?.error?.code ?? "UNKNOWN",
+      response.status,
+      payload?.error?.message ?? "Request failed"
+    );
+  }
+  return payload;
+}
+
+/** Exchanges a seeded subject for a token. Development identity provider only. */
+export async function exchangeDevToken(subject: string): Promise<string> {
+  const result = await request<{ accessToken: string }>("/v1/auth/dev-token", {
     method: "POST",
-    body: JSON.stringify({ subject })
+    body: { subject },
+    anonymous: true
   });
-  return response.data.accessToken;
+  return result.accessToken;
 }
 
-/** Idempotency keys are required on mutations. */
-export function newIdempotencyKey(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+export { API_URL };

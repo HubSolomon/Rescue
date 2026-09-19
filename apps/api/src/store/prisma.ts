@@ -68,8 +68,19 @@ function toJob(row: JobRow): Job {
 }
 
 /** Translates a Scope into a Prisma `where` fragment. */
-function scopeWhere(scope: Scope): { organizationId?: string } {
-  return scope.kind === "staff" ? {} : { organizationId: scope.organizationId };
+function scopeWhere(scope: Scope): Prisma.JobWhereInput {
+  if (scope.kind === "staff") return {};
+  if (scope.kind === "organization") return { organizationId: scope.organizationId };
+  // A provider sees a job once it holds an assignment on it.
+  return { assignments: { some: { providerId: scope.providerId } } };
+}
+
+/** Quotes are keyed by organisation, so they need their own translation. */
+function quoteScopeWhere(scope: Scope): Prisma.QuoteWhereInput {
+  if (scope.kind === "staff") return {};
+  if (scope.kind === "organization") return { organizationId: scope.organizationId };
+  // Providers never see customer pricing.
+  return { id: "__never__" };
 }
 
 export class PrismaStore implements Store {
@@ -463,13 +474,15 @@ export class PrismaStore implements Store {
   }
 
   async findQuote(id: string, scope: Scope): Promise<StoredQuote | null> {
-    const quote = await this.db.quote.findFirst({ where: { id, ...scopeWhere(scope) } });
+    const quote = await this.db.quote.findFirst({ where: { id, ...quoteScopeWhere(scope) } });
     return quote ? this.toQuote(quote) : null;
   }
 
   async listQuotesForJob(jobId: string, scope: Scope): Promise<StoredQuote[]> {
     const job = await this.db.job.findFirst({ where: { id: jobId, ...scopeWhere(scope) } });
     if (!job) throw notFound("Job");
+    // Pricing is between RESCUE and the customer; providers see their payout.
+    if (scope.kind === "provider") return [];
     const quotes = await this.db.quote.findMany({ where: { jobId }, orderBy: { createdAt: "asc" } });
     return quotes.map((quote) => this.toQuote(quote));
   }
@@ -484,7 +497,7 @@ export class PrismaStore implements Store {
     return this.db.$transaction(
       async (tx) => {
         const existing = await tx.quote.findFirst({
-          where: { id: params.quoteId, ...scopeWhere(params.scope) }
+          where: { id: params.quoteId, ...quoteScopeWhere(params.scope) }
         });
         if (!existing) throw notFound("Quote");
         if (existing.status !== "SENT") {

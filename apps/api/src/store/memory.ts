@@ -144,7 +144,13 @@ export class MemoryStore implements Store {
   }
 
   private visible(record: JobRecord, scope: Scope): boolean {
-    return scope.kind === "staff" || record.organizationId === scope.organizationId;
+    if (scope.kind === "staff") return true;
+    if (scope.kind === "organization") return record.organizationId === scope.organizationId;
+    // A provider sees a job once it has an assignment on it, and keeps seeing
+    // it afterwards so its own completed work stays readable.
+    return [...this.assignments.values()].some(
+      (assignment) => assignment.jobId === record.id && assignment.providerId === scope.providerId
+    );
   }
 
   private requireJob(jobId: string, scope: Scope): JobRecord {
@@ -452,11 +458,17 @@ export class MemoryStore implements Store {
     const quote = this.quotes.get(id);
     if (!quote) return null;
     if (scope.kind === "organization" && quote.organizationId !== scope.organizationId) return null;
+    // Pricing is between RESCUE and the customer; a provider sees its payout,
+    // never what the customer was charged.
+    if (scope.kind === "provider") return null;
     return quote;
   }
 
   async listQuotesForJob(jobId: string, scope: Scope): Promise<StoredQuote[]> {
     this.requireJob(jobId, scope);
+    // Pricing is between RESCUE and the customer. A provider can see the job
+    // and its own payout, never what the customer agreed to pay.
+    if (scope.kind === "provider") return [];
     return [...this.quotes.values()].filter((quote) => quote.jobId === jobId);
   }
 

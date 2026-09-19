@@ -172,3 +172,13 @@ describe("empty environment variables mean unset", () => {
     expect(() => parseConfig({ ...PRODUCTION_ENV, OIDC_ISSUER: "", OIDC_JWKS_URI: "" })).toThrow();
   });
 });
+
+describe("rate limit is configurable", () => {
+  it("defaults to 300 a minute, not 100", () => {
+    expect(parseConfig({}).RATE_LIMIT_MAX).toBe(300);
+  });
+
+  it("can be raised per deployment", () => {
+    expect(parseConfig({ RATE_LIMIT_MAX: "5000" }).RATE_LIMIT_MAX).toBe(5000);
+  });
+});

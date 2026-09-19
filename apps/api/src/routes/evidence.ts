@@ -42,8 +42,7 @@ export const evidenceRoutes =
         if (!assignment || assignment.providerId !== auth.providerId) throw notFound("Job");
       }
 
-      const scope = auth.isStaff ? auth.scope : ({ kind: "staff" } as const);
-      const job = await deps.store.findJob(id, scope);
+      const job = await deps.store.findJob(id, auth.scope);
       if (!job) throw notFound("Job");
 
       // Validated again here even though the schema already checked, because

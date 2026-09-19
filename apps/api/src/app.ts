@@ -121,9 +121,39 @@ export async function buildApp(options: BuildAppOptions = {}) {
     }
   });
 
+  /**
+   * A POST with `content-type: application/json` and no body is treated as
+   * `{}` rather than 400.
+   *
+   * Several endpoints -- start, complete, evidence confirmation -- take no
+   * body at all, and clients routinely set the header anyway. Rejecting those
+   * with FST_ERR_CTP_EMPTY_JSON_BODY turns a well-formed request into a
+   * protocol error. Endpoints that do require a body still validate it with
+   * Zod, so `{}` fails there with a proper VALIDATION_ERROR.
+   */
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "string", bodyLimit: 2_000_000 },
+    (_request, body, done) => {
+      const text = typeof body === "string" ? body.trim() : "";
+      if (text.length === 0) return done(null, {});
+      try {
+        done(null, JSON.parse(text));
+      } catch {
+        const error = new Error("Body is not valid JSON") as FastifyError;
+        error.statusCode = 400;
+        error.code = "FST_ERR_CTP_INVALID_JSON_BODY";
+        done(error, undefined);
+      }
+    }
+  );
+
   await app.register(helmet);
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
-  await app.register(rateLimit, { max: options.rateLimitMax ?? 100, timeWindow: "1 minute" });
+  await app.register(rateLimit, {
+    max: options.rateLimitMax ?? config.RATE_LIMIT_MAX,
+    timeWindow: "1 minute"
+  });
 
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);

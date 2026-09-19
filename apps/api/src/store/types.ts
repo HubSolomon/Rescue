@@ -33,9 +33,14 @@ import type {
  * Who a query runs as. `staff` deliberately reads across tenants and is only
  * ever constructed after a DISPATCHER, COMPLIANCE or ADMIN role check.
  */
-export type Scope = { kind: "organization"; organizationId: string } | { kind: "staff" };
+export type Scope =
+  | { kind: "organization"; organizationId: string }
+  /** A provider sees the jobs it holds or has held an assignment on. */
+  | { kind: "provider"; providerId: string }
+  | { kind: "staff" };
 
 export const orgScope = (organizationId: string): Scope => ({ kind: "organization", organizationId });
+export const providerScope = (providerId: string): Scope => ({ kind: "provider", providerId });
 export const staffScope = (): Scope => ({ kind: "staff" });
 
 export interface Actor {

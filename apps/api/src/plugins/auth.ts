@@ -8,7 +8,7 @@ import {
 } from "@rescue/contracts";
 import { bearerToken, type TokenVerifier } from "../lib/auth/verifier.js";
 import { forbidden, organizationRequired, providerContextRequired, unauthenticated } from "../lib/errors.js";
-import { orgScope, staffScope, type Actor, type Scope } from "../store/types.js";
+import { orgScope, providerScope, staffScope, type Actor, type Scope } from "../store/types.js";
 import type { Store } from "../store/types.js";
 
 /**
@@ -106,10 +106,18 @@ export function buildAuthContext(
     providerId,
     isStaff,
     actor: { userId: principal.userId, role: roles[0] ?? "CUSTOMER_MEMBER", correlationId },
-    // Staff deliberately read across tenants. Everyone else is pinned to their
-    // organisation, and a user with no organisation gets a scope that matches
-    // nothing rather than a scope that matches everything.
-    scope: isStaff ? staffScope() : orgScope(organizationId ?? "__none__")
+    // Staff deliberately read across tenants. A customer is pinned to their
+    // organisation; a provider to the jobs it holds an assignment on. A user
+    // with neither gets a scope that matches nothing, never one that matches
+    // everything. Organisation wins when a user somehow has both, because the
+    // customer relationship is the narrower claim on a job's data.
+    scope: isStaff
+      ? staffScope()
+      : organizationId !== null
+        ? orgScope(organizationId)
+        : providerId !== null
+          ? providerScope(providerId)
+          : orgScope("__none__")
   };
 }
 

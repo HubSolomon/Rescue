@@ -8,3 +8,7 @@ coverage
 *.tsbuildinfo
 .DS_Store
 packages/database/prisma/dev.db
+test-results
+playwright-report
+blob-report
+.playwright

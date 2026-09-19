@@ -45,6 +45,13 @@ const baseSchema = z.object({
    */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
 
+  /**
+   * Requests per minute per caller. 100 is fine for a customer but low for a
+   * dispatcher working a queue, who can issue that many in a few minutes of
+   * normal use. Tune per deployment rather than hardcoding.
+   */
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100_000).default(300),
+
   /** Keys the vehicle-registration hash. Registrations are never stored raw. */
   REGISTRATION_HASH_KEY: z.string().min(32).optional(),
 

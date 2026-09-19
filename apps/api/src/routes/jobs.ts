@@ -126,14 +126,16 @@ export const jobRoutes =
       const auth = requireRole(request, "PROVIDER_ADMIN", "PROVIDER_DRIVER", "DISPATCHER", "ADMIN");
       const { id } = jobIdParams.parse(request.params);
 
-      // A provider may only start a job it actually holds.
+      // A provider may only start a job it actually holds. The scope already
+      // restricts them to jobs they are assigned to; this adds that it must be
+      // the *current* assignment, not a past one.
       if (!auth.isStaff) {
         const assignment = await deps.store.findActiveAssignment(id);
         if (!assignment || assignment.providerId !== auth.providerId) throw notFound("Job");
       }
       const job = await deps.store.transitionJob({
         jobId: id,
-        scope: auth.isStaff ? auth.scope : { kind: "staff" },
+        scope: auth.scope,
         to: "IN_PROGRESS",
         actor: auth.actor,
         eventType: "WORK_STARTED"
@@ -151,8 +153,7 @@ export const jobRoutes =
         if (!assignment || assignment.providerId !== auth.providerId) throw notFound("Job");
       }
 
-      const scope = auth.isStaff ? auth.scope : ({ kind: "staff" } as const);
-      const evidence = await deps.store.listEvidence(id, scope);
+      const evidence = await deps.store.listEvidence(id, auth.scope);
       const uploaded = evidence.filter((item) => item.status === "UPLOADED");
       if (uploaded.length === 0) {
         throw new AppError(409, "CONFLICT", "Upload proof of completion before completing the job");
@@ -160,7 +161,7 @@ export const jobRoutes =
 
       const job = await deps.store.transitionJob({
         jobId: id,
-        scope,
+        scope: auth.scope,
         to: "COMPLETED",
         actor: auth.actor,
         eventType: "JOB_COMPLETED",
