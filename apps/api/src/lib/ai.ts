@@ -60,6 +60,13 @@ export class ValidatingTriageService implements TriageService {
       clock: Clock;
       /** Called with the reason whenever the rules answered instead. */
       onFallback?: (reason: string, detail?: unknown) => void;
+      /**
+       * Called once per answer, however it was produced. `onFallback` only
+       * fires on the unhappy paths, so counting from it alone gives a
+       * numerator with no denominator -- and "the model failed nine times"
+       * means something very different out of ten than out of ten thousand.
+       */
+      onAnswer?: (provenance: SuggestionProvenance) => void;
     }
   ) {}
 
@@ -70,6 +77,12 @@ export class ValidatingTriageService implements TriageService {
 
   /** The same call, with everything worth recording about how it went. */
   async suggestWithProvenance(input: CreateJobInput): Promise<SuggestionResult> {
+    const result = await this.answer(input);
+    this.deps.onAnswer?.(result.provenance);
+    return result;
+  }
+
+  private async answer(input: CreateJobInput): Promise<SuggestionResult> {
     const startedAt = this.deps.clock.now();
     const rulesAnswer = async (reason: string, detail?: unknown): Promise<SuggestionResult> => {
       if (reason !== "no model configured") this.deps.onFallback?.(reason, detail);

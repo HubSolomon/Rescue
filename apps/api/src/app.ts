@@ -33,6 +33,9 @@ import {
 import { authPlugin } from "./plugins/auth.js";
 import { createIdempotencyRunner } from "./plugins/idempotency.js";
 import { buildOpenApiDocument } from "./openapi.js";
+import { createMetrics, type AppMetrics } from "./lib/metrics.js";
+import { REDACTED_LOG_PATHS } from "./lib/redaction.js";
+import { metricsRoutes } from "./routes/metrics.js";
 import { authRoutes } from "./routes/auth.js";
 import { evidenceRoutes } from "./routes/evidence.js";
 import { healthRoutes } from "./routes/health.js";
@@ -51,6 +54,7 @@ declare module "fastify" {
     outbox: OutboxWorker;
     sweep: DispatchSweep;
     systemActor: { userId: string | null; role: "DISPATCHER"; correlationId: string };
+    metrics: AppMetrics;
   }
 }
 
@@ -66,6 +70,14 @@ export interface BuildAppOptions {
   clock?: Clock;
   verifier?: TokenVerifier;
   rateLimitMax?: number;
+  metrics?: AppMetrics;
+  /**
+   * Where log lines go. Only a test passes this, and the reason it exists is
+   * that redaction is worth nothing unless it is proven on the logger the app
+   * actually runs -- a test that constructs its own pino with the same options
+   * proves the options, not the wiring.
+   */
+  logStream?: NodeJS.WritableStream;
 }
 
 function statusCodeOf(error: unknown): number | undefined {
@@ -117,6 +129,10 @@ export async function createStore(config: Config): Promise<Store> {
 export async function buildApp(options: BuildAppOptions = {}) {
   const config = options.config ?? defaultConfig;
   const clock = options.clock ?? systemClock;
+  // Created per app rather than as a module singleton: two apps in one test
+  // process must not share counters, and a global registry is the reason
+  // metrics assertions are usually flaky.
+  const metrics = options.metrics ?? createMetrics();
   // DATABASE_URL selects PostgreSQL. Without it the in-memory store runs, which
   // `parseConfig` refuses to allow in production.
   const store = options.store ?? (await createStore(config));
@@ -133,7 +149,9 @@ export async function buildApp(options: BuildAppOptions = {}) {
     new ValidatingTriageService({
       model: config.AI_PROVIDER === "mock" ? new StubTriageModel() : null,
       clock,
-      onFallback: (reason, detail) => app.log.warn({ reason, detail }, "triage fell back to rules")
+      onFallback: (reason, detail) => app.log.warn({ reason, detail }, "triage fell back to rules"),
+      onAnswer: (provenance) =>
+        metrics.triageFallbacks.increment({ source: provenance.fellBackToRules ? "rules" : "model" })
     });
   /**
    * Geography.
@@ -154,7 +172,12 @@ export async function buildApp(options: BuildAppOptions = {}) {
           osrmBase: config.MAPS_OSRM_URL
         })
       : new PostalCodeMaps(),
-    { now: () => clock.now(), ttlMs: config.MAPS_CACHE_TTL_MS }
+    {
+      now: () => clock.now(),
+      ttlMs: config.MAPS_CACHE_TTL_MS,
+      onFallback: (error) => app.log.warn({ err: error }, "maps provider unreachable; using the estimate"),
+      onLookup: (result) => metrics.mapsLookups.increment({ result })
+    }
   );
   const sweep = new DispatchSweep({ store, clock, maps, config: options.sweep });
   const storage =
@@ -169,7 +192,15 @@ export async function buildApp(options: BuildAppOptions = {}) {
   const hops = config.TRUST_PROXY_HOPS;
 
   const app = Fastify({
-    logger: config.NODE_ENV !== "test",
+    logger:
+      config.NODE_ENV === "test" && !options.logStream
+        ? false
+        : {
+            // Redaction is configured on the logger rather than applied at call
+            // sites, because a call site can be forgotten and this cannot.
+            redact: { paths: REDACTED_LOG_PATHS, censor: "[redacted]" },
+            ...(options.logStream ? { level: "trace", stream: options.logStream } : {})
+          },
     // Trust X-Forwarded-For for exactly `hops` proxies and no more. `false`
     // keeps the rate limiter keyed on the real peer address, so a client
     // cannot choose its own bucket.
@@ -222,6 +253,27 @@ export async function buildApp(options: BuildAppOptions = {}) {
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);
     return payload;
+  });
+
+  /**
+   * Request metrics.
+   *
+   * The route *template* Fastify matched, never `request.url`: a counter
+   * labelled by URL gets one series per job id, which is how a metrics
+   * endpoint ends up with more cardinality than the database has rows. An
+   * unmatched request has no template, and is bucketed as `unmatched` rather
+   * than given its path, for the same reason -- otherwise a scanner walking
+   * random URLs can grow the series set without limit.
+   */
+  app.addHook("onResponse", async (request, reply) => {
+    const route = request.routeOptions?.url ?? "unmatched";
+    const method = request.method;
+    metrics.httpRequests.increment({
+      method,
+      route,
+      status: String(reply.statusCode)
+    });
+    metrics.httpDuration.observe({ method, route }, reply.elapsedTime / 1000);
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -300,7 +352,38 @@ export async function buildApp(options: BuildAppOptions = {}) {
     ),
     actor: systemActor,
     pollIntervalMs: config.OUTBOX_POLL_MS,
-    batchSize: config.OUTBOX_BATCH
+    batchSize: config.OUTBOX_BATCH,
+    onDrain: (result) => {
+      for (const outcome of ["delivered", "failed", "dead", "skipped"] as const) {
+        if (result[outcome] > 0) metrics.outboxOutcomes.increment({ outcome }, result[outcome]);
+      }
+    }
+  });
+
+  /**
+   * Queue depth is read at scrape time, not counted as it changes.
+   *
+   * A counter in this process would be wrong the moment a second worker
+   * claimed a row, and zero again after a restart. The question "are there
+   * dead letters right now" only has one honest answer, and it is a query.
+   */
+  metrics.registry.onCollect(async () => {
+    try {
+      const stats = await store.outboxStats();
+      for (const [status, count] of Object.entries(stats.byStatus)) {
+        metrics.outboxByStatus.set({ status }, count);
+      }
+      metrics.outboxOldestPendingSeconds.set(
+        {},
+        stats.oldestUndelivered
+          ? Math.max(0, (clock.now().getTime() - stats.oldestUndelivered.getTime()) / 1000)
+          : 0
+      );
+    } catch (error) {
+      // A scrape must not fail because the database blinked, or the alert that
+      // would have told someone the database blinked never fires.
+      app.log.warn({ err: error }, "could not collect outbox metrics");
+    }
   });
 
   // Exposed so the server can start it, and so a test can drain it by hand
@@ -308,6 +391,23 @@ export async function buildApp(options: BuildAppOptions = {}) {
   app.decorate("outbox", worker);
   app.decorate("sweep", sweep);
   app.decorate("systemActor", systemActor);
+  app.decorate("metrics", metrics);
+
+  /**
+   * `/metrics` exists when it can be protected, and not otherwise.
+   *
+   * In production that means a token; without one the route is simply not
+   * registered, so a deployment that forgot to set it gets a 404 rather than
+   * an open endpoint. Outside production it is open, because a development
+   * machine has nothing to protect and a token would be one more thing to set
+   * before anything works.
+   */
+  const metricsToken = config.METRICS_TOKEN ?? null;
+  if (metricsToken !== null || config.NODE_ENV !== "production") {
+    await app.register(metricsRoutes({ registry: metrics.registry, token: metricsToken }));
+  } else {
+    app.log.warn("METRICS_TOKEN is unset in production; /metrics is not exposed");
+  }
 
   const idempotency = createIdempotencyRunner(store, config.IDEMPOTENCY_TTL_HOURS);
   const devIssuer = config.devIdentityEnabled ? new DevTokenIssuer(config.JWT_SECRET) : null;

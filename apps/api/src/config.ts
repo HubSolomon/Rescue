@@ -88,7 +88,25 @@ const baseSchema = z.object({
   MAPS_OSRM_URL: z.string().url().optional(),
   MAPS_CACHE_TTL_MS: z.coerce.number().int().min(0).max(30 * 24 * 3600_000).default(7 * 24 * 3600_000),
 
-  AI_PROVIDER: z.enum(["mock", "openai"]).default("mock")
+  AI_PROVIDER: z.enum(["mock", "openai"]).default("mock"),
+
+  /**
+   * Bearer token a Prometheus scrape must present. Without it `/metrics` is
+   * available in development and refused to exist in production: an open
+   * metrics endpoint tells an unauthenticated caller the shape of the system
+   * and whether their traffic is getting 4xx or 5xx.
+   */
+  METRICS_TOKEN: z.string().min(16).optional(),
+
+  /**
+   * Retention, in days, per category. These are defaults chosen to be
+   * defensible rather than authoritative -- see docs/audits/DATA_INVENTORY.md
+   * for the basis of each, which a controller has to sign off on.
+   */
+  RETENTION_EVIDENCE_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
+  RETENTION_EVENT_DAYS: z.coerce.number().int().min(30).max(3650).default(2555),
+  RETENTION_OUTBOX_SENT_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  RETENTION_IDEMPOTENCY_DAYS: z.coerce.number().int().min(1).max(90).default(7)
 });
 
 function ephemeralSecret(): string {

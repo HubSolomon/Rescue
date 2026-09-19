@@ -404,6 +404,19 @@ export interface Store {
     retryAt: Date | null;
   }): Promise<void>;
   listOutbox(params: { jobId?: string; status?: OutboxStatus }): Promise<StoredOutboxMessage[]>;
+  /**
+   * How the queue looks right now, for the metrics endpoint.
+   *
+   * Counters kept in a process cannot answer this: a second worker changes the
+   * numbers and a restart forgets them, so "how many dead letters are there"
+   * has to be a query. `oldestUndelivered` is the one that matters
+   * operationally -- a backlog that is growing shows up there before it shows
+   * up anywhere else.
+   */
+  outboxStats(): Promise<{
+    byStatus: Record<OutboxStatus, number>;
+    oldestUndelivered: Date | null;
+  }>;
 
   /* --------------------------------------------------------------- ledger */
   /** Append-only. There is no update and no delete, by design. */

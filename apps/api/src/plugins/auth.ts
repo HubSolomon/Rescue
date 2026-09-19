@@ -39,7 +39,20 @@ declare module "fastify" {
 }
 
 /** Routes that may be reached without credentials. Everything else may not. */
-const PUBLIC_PATHS = new Set(["/v1/health", "/v1/ready", "/v1/openapi.json", "/v1/auth/dev-token"]);
+const PUBLIC_PATHS = new Set([
+  "/v1/health",
+  "/v1/ready",
+  "/v1/openapi.json",
+  "/v1/auth/dev-token",
+  /**
+   * Exempt from *this* check, not from authentication. A Prometheus scraper
+   * has no user and no tenant, so a principal is the wrong shape for it;
+   * `/metrics` carries its own bearer token instead, and in production it does
+   * not exist without one. Listing it here keeps the exemption visible in the
+   * allow-list rather than hidden in a hook ordering.
+   */
+  "/metrics"
+]);
 
 function resolveOrganization(principal: Principal, requested: string | undefined): string | null {
   const organizationIds = [

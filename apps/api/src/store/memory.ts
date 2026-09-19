@@ -910,6 +910,25 @@ export class MemoryStore implements Store {
       .map((message) => ({ ...message }));
   }
 
+  async outboxStats(): Promise<{
+    byStatus: Record<StoredOutboxMessage["status"], number>;
+    oldestUndelivered: Date | null;
+  }> {
+    const byStatus = { PENDING: 0, SENT: 0, FAILED: 0, DEAD: 0 };
+    let oldestUndelivered: Date | null = null;
+    for (const message of this.outbox.values()) {
+      byStatus[message.status] += 1;
+      // DEAD counts as undelivered: it is the oldest thing that never
+      // happened, and hiding it here would make the age metric look healthy
+      // precisely when it is not.
+      if (message.status === "SENT") continue;
+      if (!oldestUndelivered || message.createdAt < oldestUndelivered) {
+        oldestUndelivered = message.createdAt;
+      }
+    }
+    return { byStatus, oldestUndelivered };
+  }
+
   /* --------------------------------------------------------------- ledger */
 
   async appendLedgerEntries(params: {

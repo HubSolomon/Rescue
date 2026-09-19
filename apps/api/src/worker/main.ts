@@ -42,6 +42,10 @@ async function main(): Promise<void> {
   const sweepTick = async () => {
     try {
       const result = await app.sweep.run(app.systemActor);
+      app.metrics.sweepRuns.increment({ outcome: "ok" });
+      app.metrics.sweepActions.increment({ action: "expired" }, result.expired);
+      app.metrics.sweepActions.increment({ action: "reoffered" }, result.reoffered.length);
+      app.metrics.sweepActions.increment({ action: "escalated" }, result.escalated.length);
       if (result.expired > 0 || result.reoffered.length > 0 || result.escalated.length > 0) {
         log.info({ sweep: result }, "dispatch sweep");
       }
@@ -49,6 +53,9 @@ async function main(): Promise<void> {
         log.warn({ escalation }, "job needs a dispatcher");
       }
     } catch (error) {
+      // Counted, not just logged: a sweep that has been failing for an hour
+      // looks exactly like a quiet hour from the outside.
+      app.metrics.sweepRuns.increment({ outcome: "error" });
       log.error({ err: error }, "dispatch sweep failed");
     }
   };

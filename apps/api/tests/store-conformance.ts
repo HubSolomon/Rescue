@@ -427,4 +427,55 @@ export function runStoreConformance(name: string, context: ConformanceContext): 
       await store.close();
     });
   });
+
+  describe(`${name}: outbox statistics`, () => {
+    it("counts an empty queue as zero in every status, not as an absence", async () => {
+      const { store } = await context.create();
+      const stats = await store.outboxStats();
+      expect(stats.byStatus).toEqual({ PENDING: 0, SENT: 0, FAILED: 0, DEAD: 0 });
+      expect(stats.oldestUndelivered).toBeNull();
+      await store.close();
+    });
+
+    it("moves a row from PENDING to SENT as it is delivered", async () => {
+      const { store, organizationA, actor } = await context.create();
+      await store.createJob({ organizationId: organizationA, input: JOB_INPUT, actor });
+
+      const before = await store.outboxStats();
+      expect(before.byStatus.PENDING).toBeGreaterThan(0);
+      expect(before.oldestUndelivered).toBeInstanceOf(Date);
+
+      const claimed = await store.claimOutbox({ now: new Date(), limit: 50 });
+      for (const message of claimed) {
+        await store.markOutboxDelivered({ id: message.id, now: new Date() });
+      }
+
+      const after = await store.outboxStats();
+      expect(after.byStatus.PENDING).toBe(0);
+      expect(after.byStatus.SENT).toBe(before.byStatus.PENDING);
+      expect(after.oldestUndelivered).toBeNull();
+      await store.close();
+    });
+
+    it("counts a dead letter as still undelivered", async () => {
+      const { store, organizationA, actor } = await context.create();
+      await store.createJob({ organizationId: organizationA, input: JOB_INPUT, actor });
+      const [message] = await store.claimOutbox({ now: new Date(), limit: 1 });
+
+      // retryAt null means we have stopped trying.
+      await store.markOutboxFailed({
+        id: message!.id,
+        error: "provider refused",
+        now: new Date(),
+        retryAt: null
+      });
+
+      const stats = await store.outboxStats();
+      expect(stats.byStatus.DEAD).toBe(1);
+      // The point of the assertion: a dead letter must not make the age
+      // metric look healthy. It is the oldest thing that never happened.
+      expect(stats.oldestUndelivered).toBeInstanceOf(Date);
+      await store.close();
+    });
+  });
 }

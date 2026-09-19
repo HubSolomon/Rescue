@@ -198,6 +198,12 @@ export class CachingMaps implements MapsProvider {
       ttlMs?: number;
       /** Called when the inner provider fails, for the log. */
       onFallback?: (error: unknown) => void;
+      /**
+       * Called once per route lookup with how it was answered. The ratio of
+       * `estimate` to the rest is the number that says whether the dispatcher
+       * console is showing measurements or guesses.
+       */
+      onLookup?: (result: "cached" | "provider" | "estimate") => void;
     }
   ) {
     this.kind = inner.kind;
@@ -225,13 +231,18 @@ export class CachingMaps implements MapsProvider {
   async route(from: string, to: string): Promise<RouteEstimate> {
     const key = `${from}>${to}`;
     const hit = this.fresh(this.routes.get(key));
-    if (hit) return hit;
+    if (hit) {
+      this.options.onLookup?.("cached");
+      return hit;
+    }
     try {
       const value = await this.inner.route(from, to);
       this.routes.set(key, { at: this.options.now().getTime(), value });
+      this.options.onLookup?.(value.isRoadDistance ? "provider" : "estimate");
       return value;
     } catch (error) {
       this.options.onFallback?.(error);
+      this.options.onLookup?.("estimate");
       // Not cached: a failure should be retried on the next request rather
       // than remembered for a week.
       return this.fallback.route(from, to);

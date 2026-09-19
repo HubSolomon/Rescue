@@ -34,6 +34,12 @@ export interface WorkerOptions {
   actor: Actor;
   batchSize?: number;
   pollIntervalMs?: number;
+  /**
+   * Called after every pass, including the empty ones. Counting only
+   * non-empty passes would make a worker that has stopped claiming look
+   * identical to a worker with nothing to do.
+   */
+  onDrain?: (result: DrainResult) => void;
 }
 
 export interface DrainResult {
@@ -116,6 +122,7 @@ export class OutboxWorker {
         }
       }
     }
+    this.options.onDrain?.(result);
     return result;
   }
 

@@ -1044,6 +1044,28 @@ export class PrismaStore implements Store {
     return rows.map((row) => this.toOutbox(row));
   }
 
+  async outboxStats(): Promise<{
+    byStatus: Record<StoredOutboxMessage["status"], number>;
+    oldestUndelivered: Date | null;
+  }> {
+    // Two aggregates rather than loading the table: this runs on every scrape,
+    // and a metrics endpoint that reads the whole outbox is a metrics endpoint
+    // that becomes the outage.
+    const [grouped, oldest] = await Promise.all([
+      this.db.outboxMessage.groupBy({ by: ["status"], _count: { _all: true } }),
+      this.db.outboxMessage.findFirst({
+        where: { status: { not: "SENT" } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true }
+      })
+    ]);
+    const byStatus = { PENDING: 0, SENT: 0, FAILED: 0, DEAD: 0 };
+    for (const row of grouped) {
+      byStatus[row.status as StoredOutboxMessage["status"]] = row._count._all;
+    }
+    return { byStatus, oldestUndelivered: oldest?.createdAt ?? null };
+  }
+
   private toOutbox(row: {
     id: string;
     topic: string;
