@@ -1,6 +1,8 @@
+import Fastify from "fastify";
 import { buildApp } from "../app.js";
 import { config } from "../config.js";
 import { systemClock } from "../lib/clock.js";
+import { metricsRoutes } from "../routes/metrics.js";
 
 /**
  * The worker process.
@@ -38,6 +40,34 @@ async function main(): Promise<void> {
   }
 
   app.outbox.start();
+
+  /**
+   * A listener for the scraper, and nothing else.
+   *
+   * The sweep and retention counters live in THIS process, so without a
+   * listener they never reach Prometheus and every alert about dispatch or
+   * retention stays permanently pending -- which on a dashboard is
+   * indistinguishable from healthy.
+   *
+   * Its own tiny Fastify rather than `app.listen()`: the worker's app carries
+   * the full `/v1` surface, and publishing a second unauthenticated copy of
+   * the API from a process nobody expects to serve traffic would be a much
+   * larger mistake than the one this fixes. Only `/metrics` and `/health`, and
+   * `/metrics` keeps the same token rule it has on the API.
+   */
+  let metricsServer: ReturnType<typeof Fastify> | null = null;
+  if (config.WORKER_METRICS_PORT > 0) {
+    const token = config.METRICS_TOKEN ?? null;
+    if (token === null && config.NODE_ENV === "production") {
+      log.warn("METRICS_TOKEN is unset in production; the worker will not expose /metrics");
+    } else {
+      metricsServer = Fastify({ logger: false });
+      await metricsServer.register(metricsRoutes({ registry: app.metrics.registry, token }));
+      metricsServer.get("/health", async () => ({ status: "ok", service: "rescue-worker" }));
+      await metricsServer.listen({ port: config.WORKER_METRICS_PORT, host: config.API_HOST });
+      log.info({ port: config.WORKER_METRICS_PORT }, "worker metrics listening");
+    }
+  }
 
   const sweepTick = async () => {
     try {
@@ -88,6 +118,7 @@ async function main(): Promise<void> {
     // Stop claiming, then close. In-flight deliveries finish; anything claimed
     // and not marked delivered returns to the queue when its lease expires.
     await app.outbox.stop();
+    await metricsServer?.close();
     await app.close();
     process.exit(0);
   };

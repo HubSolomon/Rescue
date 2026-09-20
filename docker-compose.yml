@@ -32,6 +32,44 @@ services:
       MINIO_ROOT_PASSWORD: miniosecret
     ports: ["9000:9000", "9001:9001"]
     volumes: ["rescue_minio:/data"]
+  # ------------------------------------------------------- observability
+  # Under a profile, so `docker compose up -d` stays the three things a
+  # developer needs and nobody waits on a monitoring stack to run a test.
+  #   docker compose --profile observability up -d
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      # Needed to reload rules without a restart: curl -XPOST localhost:9090/-/reload
+      - --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      # The scrape token. Create it before starting:
+      #   echo -n "$METRICS_TOKEN" > deploy/prometheus/metrics-token
+      # It is gitignored; an empty file is fine when the API has no token set.
+      - ./deploy/prometheus/metrics-token:/etc/prometheus/metrics-token:ro
+      - rescue_prometheus:/prometheus
+    ports: ["9090:9090"]
+    environment:
+      RESCUE_ENV: development
+    extra_hosts:
+      # The API and the worker run on the host under `pnpm dev`, not in
+      # compose. Without this the scrape targets resolve to the container
+      # itself and every series is missing, which looks like an outage.
+      - "api:host-gateway"
+      - "worker:host-gateway"
+
+  alertmanager:
+    profiles: ["observability"]
+    image: prom/alertmanager:v0.28.0
+    volumes:
+      - ./deploy/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports: ["9093:9093"]
+
 volumes:
   rescue_postgres:
   rescue_minio:
+  rescue_prometheus:

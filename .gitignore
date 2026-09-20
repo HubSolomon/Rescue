@@ -12,3 +12,6 @@ test-results
 playwright-report
 blob-report
 .playwright
+
+# The Prometheus scrape token: a real credential, written by the operator.
+deploy/prometheus/metrics-token

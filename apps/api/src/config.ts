@@ -99,6 +99,17 @@ const baseSchema = z.object({
   METRICS_TOKEN: z.string().min(16).optional(),
 
   /**
+   * Port the worker serves `/metrics` and `/health` on.
+   *
+   * The worker is a separate process and holds counters the API does not --
+   * the dispatch sweep and the retention job run only here. Without a
+   * listener those series never reach a scraper, and every alert about
+   * dispatch or retention sits permanently pending, which reads as healthy.
+   * 0 disables the listener for a deployment that collects another way.
+   */
+  WORKER_METRICS_PORT: z.coerce.number().int().min(0).max(65_535).default(4_001),
+
+  /**
    * Retention, in days, per category. These are defaults chosen to be
    * defensible rather than authoritative -- see docs/audits/DATA_INVENTORY.md
    * for the basis of each, which a controller has to sign off on.

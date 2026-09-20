@@ -1,0 +1,208 @@
+# Alert rules for RESCUE.
+#
+# The readiness report's first finding was that nothing alerts: every metric
+# Phase 5 added had to be looked at by someone who already suspected a problem.
+# These are the rules that close it.
+#
+# Two principles, and they are why the list is short.
+#
+# An alert must correspond to an action. If the answer to "what do I do about
+# this at 3am" is "look at it tomorrow", it is a dashboard panel, not an alert.
+# Every rule below names the action in its annotation, and the runbook link
+# goes to the section that describes it.
+#
+# An alert must not fire on a healthy system. A rule that cries wolf once a
+# week is a rule people mute, and a muted rule is worse than no rule because
+# it looks like coverage. Every threshold here is set against the system's own
+# configured timings -- a twenty-minute offer TTL, a two-second outbox poll, a
+# one-minute sweep -- rather than a round number.
+
+groups:
+  - name: rescue-delivery
+    interval: 30s
+    rules:
+      # ---------------------------------------------------------------- page
+      - alert: OutboxBacklogGrowing
+        # The single best indicator that delivery has stopped. Not queue depth:
+        # a deep queue that is draining is fine, and a shallow one that is not
+        # draining is not. Age is the honest measure of both.
+        #
+        # Ten minutes, because the poll is two seconds and the backoff ladder
+        # reaches ~30s by the second attempt. Anything undelivered for ten
+        # minutes is not waiting on a retry; it is waiting on a person.
+        expr: rescue_outbox_oldest_pending_seconds > 600
+        for: 5m
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "Outbox has undelivered work older than 10 minutes"
+          description: >-
+            The oldest undelivered message is {{ $value | humanizeDuration }} old.
+            Customers and providers are not being told what happened to their jobs.
+          action: >-
+            Check the worker is running and has DATABASE_URL. With none it starts
+            against its own in-memory store, warns, and shares nothing with the API.
+          runbook: "docs/runbooks/INCIDENTS.md#1-nobody-is-being-notified"
+
+      - alert: OutboxDeadLetters
+        # Any dead letter is work that will never happen unless a person acts.
+        # There is no healthy non-zero value, so there is no threshold to tune.
+        expr: rescue_outbox_messages{status="DEAD"} > 0
+        for: 1m
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "{{ $value }} outbox message(s) gave up after the final attempt"
+          description: >-
+            Five attempts with exponential backoff have been exhausted. These
+            rows are retained deliberately and will never be retried on their own.
+          action: >-
+            Group them by topic and read lastError. Fix the cause, then reset the
+            rows to PENDING -- the runbook has the statement.
+          runbook: "docs/runbooks/INCIDENTS.md#1-nobody-is-being-notified"
+
+      - alert: DispatchEscalation
+        # The sweep's safety valve: three rounds of offers, then hand the job to
+        # a human. Escalations currently go to a null recipient, so this alert
+        # is the ONLY way anyone finds out. Until there is an on-call address in
+        # the system, treat it as the notification rather than as a warning
+        # about one -- see limitation 5 in the readiness report.
+        expr: increase(rescue_dispatch_sweep_actions_total{action="escalated"}[15m]) > 0
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "A job ran out of providers and needs a dispatcher"
+          description: >-
+            {{ $value }} job(s) escalated in the last 15 minutes. Every eligible
+            provider was offered the work and none accepted.
+          action: "Open the dispatcher console and widen, re-price or place the job by hand."
+          runbook: "docs/runbooks/INCIDENTS.md#2-a-job-has-been-sitting-in-quoted-for-hours"
+
+      - alert: DispatchSweepFailing
+        # A sweep that has been throwing for an hour looks exactly like a quiet
+        # hour from the outside: no offers expire, nothing is re-offered, and no
+        # escalation is raised. Silence is the symptom, which is why it needs a
+        # rule of its own.
+        expr: increase(rescue_dispatch_sweep_runs_total{outcome="error"}[10m]) > 2
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "The dispatch sweep is failing"
+          description: >-
+            {{ $value }} failed passes in 10 minutes. Offers are not expiring, so
+            jobs can sit uncovered while their offers display as lapsed.
+          action: "Read the worker log for 'dispatch sweep failed' and the underlying error."
+          runbook: "docs/runbooks/INCIDENTS.md#2-a-job-has-been-sitting-in-quoted-for-hours"
+
+      - alert: DispatchSweepStopped
+        # The worker process died, or its timer did. One pass a minute is the
+        # default, so twenty minutes of complete silence is not a quiet period.
+        expr: increase(rescue_dispatch_sweep_runs_total[20m]) == 0
+        for: 5m
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "The dispatch sweep has not run for 20 minutes"
+          description: "The sweep runs once a minute. No passes at all means the worker is gone."
+          action: "Restart the worker process; check it did not exit on an unhandled rejection."
+          runbook: "docs/runbooks/INCIDENTS.md#0-first-two-minutes"
+
+  - name: rescue-api
+    interval: 30s
+    rules:
+      - alert: ApiErrorRate
+        # 5xx only. A rise in 4xx is a client or an attacker and is not a page;
+        # a rise in 5xx is us. Five percent over five minutes, which a healthy
+        # deployment never reaches.
+        expr: >-
+          sum(rate(rescue_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(rescue_http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "More than 5% of requests are returning 5xx"
+          description: "{{ $value | humanizePercentage }} of requests over the last 5 minutes."
+          action: "Check /ready first -- a green /health with a red /ready is a dependency, not the process."
+          runbook: "docs/runbooks/INCIDENTS.md#0-first-two-minutes"
+
+      - alert: ApiLatency
+        # The 95th percentile, not the mean: the mean hides the tail that people
+        # actually feel. Two seconds is generous for an API in front of one
+        # database, and deliberately so -- this should fire on a real problem.
+        expr: >-
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(rescue_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels: { severity: warn, service: rescue }
+        annotations:
+          summary: "95th-percentile request latency is above 2 seconds"
+          action: "Look at the database first; every slow path here ends in a query."
+          runbook: "docs/runbooks/INCIDENTS.md#0-first-two-minutes"
+
+      - alert: ApiDown
+        expr: up{job="rescue-api"} == 0
+        for: 2m
+        labels: { severity: page, service: rescue }
+        annotations:
+          summary: "The API is not answering a scrape"
+          action: "If /health answers but the scrape does not, check METRICS_TOKEN."
+          runbook: "docs/runbooks/INCIDENTS.md#0-first-two-minutes"
+
+  - name: rescue-quality
+    interval: 1m
+    rules:
+      - alert: DistancesAreGuesses
+        # Not an outage. The maps port degrades to the postal-code estimate when
+        # OpenStreetMap is unreachable, and the answer carries isRoadDistance:
+        # false all the way to the dispatcher's console -- so nothing is
+        # presented as a measurement that is not one. But eligibility uses the
+        # distance, so a provider who should be in range may be excluded while
+        # this lasts. That is a correctness question, not only a display one.
+        expr: >-
+          sum(rate(rescue_maps_lookups_total{result="estimate"}[15m]))
+            / clamp_min(sum(rate(rescue_maps_lookups_total[15m])), 0.001) > 0.5
+        for: 15m
+        labels: { severity: warn, service: rescue }
+        annotations:
+          summary: "Over half of distance lookups are falling back to the estimate"
+          description: >-
+            OpenStreetMap is unreachable or rate-limiting. Distances are postal-code
+            guesses, flagged as such in the console, and eligibility is using them.
+          action: >-
+            Check Nominatim reachability and whether a cold cache after a restart
+            breached their one-request-a-second policy.
+          runbook: "docs/runbooks/INCIDENTS.md#4-distances-look-wrong"
+
+      - alert: TriageModelFailing
+        # The rules engine answering is a correct, designed fallback -- nothing
+        # breaks. But it is silent, and a model that has been down for a day is
+        # worth knowing about before the bill or the quality question arrives.
+        expr: >-
+          sum(rate(rescue_triage_answers_total{source="rules"}[30m]))
+            / clamp_min(sum(rate(rescue_triage_answers_total[30m])), 0.001) > 0.8
+        for: 30m
+        labels: { severity: warn, service: rescue }
+        annotations:
+          summary: "Triage is answering from the rules engine, not the model"
+          description: >-
+            {{ $value | humanizePercentage }} of suggestions came from the rules over
+            30 minutes. Dispatchers still get a usable suggestion; it is just not the model's.
+          action: "Grep the API log for 'triage fell back to rules' and read the reason."
+          runbook: "docs/runbooks/INCIDENTS.md#0-first-two-minutes"
+
+      - alert: RetentionNotRunning
+        # Storage limitation -- Article 5(1)(e) -- is the principle a system
+        # breaches by doing nothing. The job runs daily in the worker; a counter
+        # that has not moved in 48 hours means it is not running, and the
+        # deletions it owes are not happening.
+        #
+        # `> 0` on a counter that may legitimately be zero is the wrong test, so
+        # this watches for the series going absent instead: the worker exports
+        # it at zero on start.
+        expr: absent(rescue_retention_deletions_total) or increase(rescue_retention_deletions_total[48h]) < 0
+        for: 1h
+        labels: { severity: warn, service: rescue }
+        annotations:
+          summary: "The retention job has not reported in 48 hours"
+          description: >-
+            Evidence past a year, delivered outbox rows past thirty days and
+            idempotency records past seven are not being removed.
+          action: "Check the worker process; retention runs on its own daily timer there."
+          runbook: "docs/audits/DATA_INVENTORY.md"
