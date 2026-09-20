@@ -39,6 +39,14 @@ enum Urgency {
   URGENT
 }
 
+enum VehicleClass {
+  CARGO_BIKE
+  SMALL_VAN
+  LARGE_VAN
+  BOX_VAN
+  TRUCK
+}
+
 enum ProviderStatus {
   PENDING
   ACTIVE
@@ -53,123 +61,397 @@ enum DocumentStatus {
   REJECTED
 }
 
+enum DocumentType {
+  LIABILITY_INSURANCE
+  CARGO_INSURANCE
+  TRADE_LICENCE
+  WASTE_CARRIER_PERMIT
+  VEHICLE_REGISTRATION
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  FELL_THROUGH
+  COMPLETED
+}
+
+enum EvidenceKind {
+  PICKUP_PHOTO
+  DELIVERY_PHOTO
+  SIGNATURE
+  DAMAGE_REPORT
+}
+
+enum EvidenceStatus {
+  REQUESTED
+  UPLOADED
+  REJECTED
+}
+
 model User {
+  id          String       @id @default(uuid())
+  /// OIDC `sub` claim. The join key between the identity provider and RESCUE.
+  subject     String       @unique
+  email       String       @unique
+  name        String
+  memberships Membership[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/// A user's authority inside exactly one tenant: a customer organisation, a
+/// provider, or neither (RESCUE staff). Authorisation reads only from here.
+model Membership {
   id             String        @id @default(uuid())
-  email          String        @unique
-  name           String
-  role           UserRole
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
+  providerId     String?
+  provider       Provider?     @relation(fields: [providerId], references: [id])
+  role           UserRole
   createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+
+  @@unique([userId, organizationId, providerId, role])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([providerId])
 }
 
 model Organization {
-  id        String   @id @default(uuid())
-  name      String
-  vatId     String?
-  users     User[]
-  jobs      Job[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String           @id @default(uuid())
+  name            String
+  vatId           String?
+  memberships     Membership[]
+  jobs            Job[]
+  quotes          Quote[]
+  idempotencyKeys IdempotencyKey[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model Provider {
   id              String             @id @default(uuid())
   legalName       String
   status          ProviderStatus     @default(PENDING)
+  basePostalCode  String
   serviceRadiusKm Int                @default(30)
+  serviceTypes    JobType[]
+  contactEmail    String
+  vatId           String?
+  /// The provider's own switch, distinct from `status`. `status` is what
+  /// RESCUE decided about the company; this is what the company says about
+  /// today. Kept separate so a provider pausing for an afternoon does not look
+  /// like one we suspended, and can switch itself back on.
+  acceptingWork    Boolean           @default(true)
+  availabilityNote String?
+  memberships     Membership[]
   vehicles        Vehicle[]
   documents       ProviderDocument[]
+  offers          AssignmentOffer[]
   assignments     Assignment[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
+
+  @@index([status])
 }
 
 model Vehicle {
-  id               String   @id @default(uuid())
+  id               String       @id @default(uuid())
   providerId       String
-  provider         Provider @relation(fields: [providerId], references: [id])
+  provider         Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  /// Salted hash of the registration plate. The plaintext is never stored.
   registrationHash String
-  class            String
+  vehicleClass     VehicleClass
   payloadKg        Int
-  volumeM3         Decimal  @db.Decimal(6, 2)
-  active           Boolean  @default(true)
-  createdAt        DateTime @default(now())
+  volumeM3         Decimal      @db.Decimal(6, 2)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+
+  @@unique([providerId, registrationHash])
+  @@index([providerId, active])
 }
 
 model ProviderDocument {
   id         String         @id @default(uuid())
   providerId String
-  provider   Provider       @relation(fields: [providerId], references: [id])
-  type       String
+  provider   Provider       @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  type       DocumentType
   status     DocumentStatus @default(PENDING)
+  /// Object-storage key only. Never a URL and never file bytes.
   storageKey String
   expiresAt  DateTime?
   reviewedAt DateTime?
   createdAt  DateTime       @default(now())
+
+  @@index([providerId, type, status])
 }
 
 model Job {
-  id                String       @id @default(uuid())
+  id                String            @id @default(uuid())
   organizationId    String
-  organization      Organization @relation(fields: [organizationId], references: [id])
+  organization      Organization      @relation(fields: [organizationId], references: [id])
   type              JobType
-  status            JobStatus    @default(DRAFT)
+  status            JobStatus         @default(DRAFT)
   urgency           Urgency
   pickup            Json
   destination       Json?
   items             Json
-  stairs            Int          @default(0)
-  liftAvailable     Boolean      @default(false)
+  stairs            Int               @default(0)
+  liftAvailable     Boolean           @default(false)
   requestedAt       DateTime?
   customerReference String?
   notes             String?
-  quoteNetCents     Int?
+  approvedVehicleClass VehicleClass?
+  approvedWorkers      Int?
+  approvedCircularRoute String?
+  quotes            Quote[]
+  offers            AssignmentOffer[]
+  outbox            OutboxMessage[]
+  ledger            LedgerEntry[]
+  suggestions       Suggestion[]
   assignments       Assignment[]
   events            JobEvent[]
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  evidence          Evidence[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([organizationId, createdAt])
   @@index([status, urgency])
 }
 
-model Assignment {
-  id             String    @id @default(uuid())
-  jobId          String
-  job            Job       @relation(fields: [jobId], references: [id])
-  providerId     String
-  provider       Provider  @relation(fields: [providerId], references: [id])
-  status         String
-  payoutNetCents Int
-  acceptedAt     DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime  @default(now())
+model Quote {
+  id                 String       @id @default(uuid())
+  jobId              String
+  job                Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  status             QuoteStatus  @default(SENT)
+  /// All monetary columns are integer euro cents. No Float, ever.
+  netCents           Int
+  vatCents           Int
+  grossCents         Int
+  vatRateBasisPoints Int
+  currency           String       @default("EUR")
+  breakdown          Json?
+  notes              String?
+  validUntil         DateTime
+  approvedAt         DateTime?
+  approvedByUserId   String?
+  createdAt          DateTime     @default(now())
 
   @@index([jobId, status])
+  @@index([organizationId, createdAt])
 }
 
+model AssignmentOffer {
+  id             String      @id @default(uuid())
+  jobId          String
+  job            Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  providerId     String
+  provider       Provider    @relation(fields: [providerId], references: [id])
+  status         OfferStatus @default(PENDING)
+  payoutNetCents Int
+  currency       String      @default("EUR")
+  expiresAt      DateTime
+  respondedAt    DateTime?
+  declineReason  String?
+  createdAt      DateTime    @default(now())
+
+  /// One live offer per provider per job.
+  @@unique([jobId, providerId])
+  @@index([jobId, status])
+  @@index([status, expiresAt])
+}
+
+model Assignment {
+  id             String           @id @default(uuid())
+  jobId          String
+  job            Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  providerId     String
+  provider       Provider         @relation(fields: [providerId], references: [id])
+  status         AssignmentStatus @default(ACTIVE)
+  payoutNetCents Int
+  currency       String           @default("EUR")
+  acceptedAt     DateTime         @default(now())
+  completedAt    DateTime?
+  fellThroughAt  DateTime?
+
+  /// At most one ACTIVE assignment per job is enforced in the accept
+  /// transaction; this index makes that check cheap.
+  @@index([jobId, status])
+  @@index([providerId, status])
+}
+
+model Evidence {
+  id               String         @id @default(uuid())
+  jobId            String
+  job              Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  kind             EvidenceKind
+  status           EvidenceStatus @default(REQUESTED)
+  mimeType         String
+  sizeBytes        Int
+  /// Object-storage key only.
+  storageKey       String         @unique
+  uploadedByUserId String?
+  createdAt        DateTime       @default(now())
+  uploadedAt       DateTime?
+
+  @@index([jobId, kind])
+}
+
+/// Replay protection for mutating requests. Scoped per organisation so one
+/// tenant's key can never collide with or read another's.
+model IdempotencyKey {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String
+  method         String
+  path           String
+  /// SHA-256 of the canonical request body. A replay with a different body is
+  /// a client bug and is refused rather than silently served the old response.
+  requestHash    String
+  statusCode     Int
+  responseBody   Json
+  createdAt      DateTime     @default(now())
+  expiresAt      DateTime
+
+  @@unique([organizationId, key])
+  @@index([expiresAt])
+}
+
+/// Append-only. The application role is granted INSERT and SELECT but not
+/// UPDATE or DELETE; see the grants in the initial migration.
 model JobEvent {
-  id        String   @id @default(uuid())
-  jobId     String
-  job       Job      @relation(fields: [jobId], references: [id])
-  actorId   String?
-  type      String
-  payload   Json
-  createdAt DateTime @default(now())
+  id            String   @id @default(uuid())
+  jobId         String
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  actorId       String?
+  type          String
+  payload       Json
+  correlationId String?
+  createdAt     DateTime @default(now())
 
   @@index([jobId, createdAt])
 }
 
+/// Append-only, as above.
 model AuditLog {
-  id         String   @id @default(uuid())
-  actorId    String?
-  action     String
-  entityType String
-  entityId   String
-  metadata   Json
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid())
+  actorId       String?
+  actorRole     String?
+  action        String
+  entityType    String
+  entityId      String
+  metadata      Json
+  correlationId String?
+  createdAt     DateTime @default(now())
 
   @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  DEAD
+}
+
+/// The transactional outbox.
+///
+/// A row is written in the SAME transaction as the state change it describes,
+/// so a job cannot move without the intent to tell someone being durable, and
+/// the intent cannot exist for a move that rolled back. A separate worker
+/// turns rows into effects. `dedupeKey` is unique: enqueueing the same intent
+/// twice collapses to one row, which is what keeps at-least-once delivery from
+/// becoming at-least-twice notification.
+model OutboxMessage {
+  id          String       @id @default(uuid())
+  topic       String
+  dedupeKey   String       @unique
+  jobId       String?
+  job         Job?         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  payload     Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now())
+  lastError   String?
+  createdAt   DateTime     @default(now())
+  deliveredAt DateTime?
+
+  /// The worker's claim query: due, not yet done, oldest first.
+  @@index([status, availableAt])
+  @@index([jobId, createdAt])
+}
+
+enum LedgerEntryKind {
+  AUTHORISATION
+  AUTHORISATION_VOID
+  CAPTURE
+  REFUND
+  PAYOUT
+  PAYOUT_REVERSAL
+}
+
+/// Append-only money movements, in integer euro cents.
+///
+/// Signed from RESCUE's point of view: money in is positive, money out is
+/// negative, so the sum of the column is always meaningful. There is no
+/// balance column anywhere -- a balance is a fold over these rows. A stored
+/// balance and its entries can disagree, and when they do neither can be
+/// trusted.
+model LedgerEntry {
+  id                String          @id @default(uuid())
+  jobId             String
+  job               Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  kind              LedgerEntryKind
+  amountCents       Int
+  currency          String          @default("EUR")
+  externalReference String?
+  note              String?
+  createdAt         DateTime        @default(now())
+
+  @@index([jobId, createdAt])
+  @@index([kind, createdAt])
+}
+
+/// A model-produced suggestion, with the provenance to explain it later.
+///
+/// Recorded whether or not a dispatcher acts on it, and never consulted when
+/// deciding whether a transition is allowed: the job's own state machine does
+/// that. Kept so that "why did it suggest a box van" has an answer that names
+/// a prompt and a version rather than a vibe.
+model Suggestion {
+  id             String   @id @default(uuid())
+  jobId          String
+  job            Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  kind           String
+  output         Json
+  promptId       String
+  promptVersion  String
+  model          String
+  confidence     Float
+  latencyMs      Int
+  fellBackToRules Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([jobId, createdAt])
 }

@@ -1,47 +1,253 @@
-:root { --navy:#102a43; --green:#18a06a; --amber:#f2a93b; --ink:#1d2733; --muted:#607080; --pale:#f4f7f9; --line:#d7e0e7; }
+/* Brand colours are sampled from the logo artwork, not chosen beside it:
+   --navy, --green and --amber are the exact inks in apps/web/public/brand.
+   --green-strong is the same hue and saturation, darkened until white text
+   clears 4.5:1 on it. The brand green does not, so it fills the mark and
+   decorative shapes while --green-strong carries every button and every
+   piece of green text. */
+:root {
+  /* brand, straight off the artwork */
+  --navy:#0d2b44; --green:#0d9b67; --green-strong:#0b8458; --amber:#f6a641;
+  /* text and ground */
+  --ink:#1d2733; --muted:#607080; --pale:#f4f7f9; --line:#d7e0e7; --surface:#ffffff;
+  /* controls */
+  --input-border:#bcc9d3; --focus:#0b6bcb; --error:#b42318;
+  /* badge tones: each is a ground and the text that reads on it */
+  --tone-neutral-bg:#eceff2;  --tone-neutral-ink:#3c4a57;
+  --tone-info-bg:#e6f0fb;     --tone-info-ink:#0b4a86;
+  --tone-progress-bg:#fff2dc; --tone-progress-ink:#7a4d00;
+  --tone-good-bg:#eaf7f1;     --tone-good-ink:#0a6b47;
+  --tone-bad-bg:#fdecea;      --tone-bad-ink:#8a1c11;
+  --tone-muted-bg:#f1f3f5;    --tone-muted-ink:#55606b;
+  /* situational surfaces */
+  --callout-bg:#fff7e6; --callout-line:#f0d089; --callout-ink:#7a5200;
+  --error-surface:#fff5f4; --error-line:#f0b3ac; --error-ink:#7a1c13;
+  --eligible-surface:#f6fcf9; --paused-ink:#92400e;
+  --skeleton-base:#eef2f5; --skeleton-sheen:#e2e9ee;
+}
 * { box-sizing:border-box; }
 html { color-scheme:light; }
-body { margin:0; color:var(--ink); background:#fff; font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+body { margin:0; color:var(--ink); background:var(--surface); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 a { color:inherit; text-decoration:none; }
 button,input,select,textarea { font:inherit; }
 .shell { width:min(1160px,calc(100% - 32px)); margin:0 auto; }
 .nav { position:sticky; top:0; z-index:20; background:rgba(255,255,255,.94); border-bottom:1px solid var(--line); backdrop-filter:blur(12px); }
 .nav-inner { min-height:72px; display:flex; align-items:center; justify-content:space-between; gap:24px; }
-.brand { display:flex; align-items:center; gap:12px; font-weight:900; letter-spacing:.04em; color:var(--navy); }
-.mark { width:38px; height:38px; border:8px solid var(--green); border-left-color:var(--navy); border-radius:50% 50% 50% 14px; position:relative; }
-.mark:after { content:""; position:absolute; width:18px; height:7px; background:var(--amber); top:7px; left:-9px; clip-path:polygon(0 0,70% 0,100% 50%,70% 100%,0 100%); }
+.brand { display:flex; align-items:center; gap:10px; }
+/* The artwork's own aspect ratio: height is fixed, width follows, so nothing
+   is ever squashed to fit a box. */
+.brand-lockup { height:44px; width:auto; display:block; }
+.brand-mark { height:30px; width:auto; display:block; }
+.brand-name { font-weight:900; letter-spacing:.04em; color:var(--navy); font-size:19px; }
 .nav-links { display:flex; gap:18px; align-items:center; color:var(--muted); font-size:14px; }
-.button { border:0; border-radius:10px; padding:12px 18px; font-weight:800; cursor:pointer; background:var(--green); color:white; display:inline-flex; justify-content:center; align-items:center; }
+.button { border:0; border-radius:10px; padding:12px 18px; font-weight:800; cursor:pointer; background:var(--green-strong); color:var(--surface); display:inline-flex; justify-content:center; align-items:center; }
 .button.secondary { background:var(--navy); }
 .button.ghost { background:transparent; color:var(--navy); border:1px solid var(--line); }
-.hero { padding:92px 0 76px; background:radial-gradient(circle at 85% 15%,rgba(24,160,106,.17),transparent 24%),linear-gradient(135deg,#fff 0%,#f4f7f9 100%); }
+.hero { padding:92px 0 76px; background:radial-gradient(circle at 85% 15%,rgba(13,155,103,.17),transparent 24%),linear-gradient(135deg,var(--surface) 0%,var(--pale) 100%); }
 .hero-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:48px; align-items:center; }
-.eyebrow { color:var(--green); font-size:13px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.eyebrow { color:var(--green-strong); font-size:13px; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
 h1 { color:var(--navy); font-size:clamp(42px,6vw,70px); line-height:1.02; letter-spacing:-.04em; margin:14px 0 20px; }
 h2 { color:var(--navy); font-size:32px; letter-spacing:-.025em; margin:0 0 14px; }
 h3 { color:var(--navy); margin:0 0 8px; }
 .lead { color:var(--muted); font-size:19px; line-height:1.65; max-width:720px; }
 .actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:28px; }
-.panel { background:#fff; border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 20px 50px rgba(16,42,67,.09); }
+.panel { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 20px 50px rgba(13,43,68,.09); }
 .status { display:flex; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--line); }
 .status:last-child { border-bottom:0; }
-.badge { font-size:12px; font-weight:800; border-radius:999px; padding:5px 9px; background:#eaf7f1; color:#087a50; }
+.badge { font-size:12px; font-weight:800; border-radius:999px; padding:5px 9px; background:var(--tone-good-bg); color:var(--tone-good-ink); }
 .section { padding:72px 0; }
 .section.pale { background:var(--pale); }
 .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:32px; }
-.card { border:1px solid var(--line); border-radius:16px; padding:22px; background:#fff; }
+.card { border:1px solid var(--line); border-radius:16px; padding:22px; background:var(--surface); }
 .card p { color:var(--muted); line-height:1.55; }
 .layout { min-height:calc(100vh - 72px); background:var(--pale); padding:34px 0 70px; }
 .dashboard-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin:24px 0; }
-.metric { background:#fff; border:1px solid var(--line); padding:20px; border-radius:14px; }
+.metric { background:var(--surface); border:1px solid var(--line); padding:20px; border-radius:14px; }
 .metric strong { display:block; color:var(--green); font-size:27px; margin-bottom:4px; }
 .form { display:grid; gap:18px; }
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 label { display:grid; gap:7px; font-weight:800; color:var(--navy); font-size:14px; }
-input,select,textarea { width:100%; border:1px solid #bcc9d3; border-radius:10px; padding:12px; background:#fff; color:var(--ink); }
+input,select,textarea { width:100%; border:1px solid var(--input-border); border-radius:10px; padding:12px; background:var(--surface); color:var(--ink); }
 textarea { min-height:110px; resize:vertical; }
-.error { color:#b42318; font-size:13px; }
-.success { padding:16px; border-radius:12px; background:#eaf7f1; color:#087a50; }
+.error { color:var(--error); font-size:13px; }
+.success { padding:16px; border-radius:12px; background:var(--tone-good-bg); color:var(--tone-good-ink); }
 .footer { padding:35px 0; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
-@media (max-width:850px) { .hero-grid,.grid3,.form-grid { grid-template-columns:1fr; } .dashboard-grid { grid-template-columns:1fr 1fr; } .nav-links a:not(.button) { display:none; } }
+/* The provider console is used on a phone, in a van. Hiding the navigation
+   below 850px left that user with no way to reach their fleet, their jobs or
+   the language toggle, so the bar wraps onto a second line instead. */
+@media (max-width:850px) {
+  .hero-grid,.grid3,.form-grid { grid-template-columns:1fr; }
+  .dashboard-grid { grid-template-columns:1fr 1fr; }
+  .nav-inner { flex-wrap:wrap; gap:10px 16px; padding:12px 0; }
+  .nav-links { flex-wrap:wrap; gap:12px 16px; row-gap:10px; width:100%; justify-content:flex-start; }
+  .nav-links .who { margin-left:auto; }
+}
 @media (max-width:520px) { .dashboard-grid { grid-template-columns:1fr; } .hero { padding-top:54px; } }
+
+/* ---------------------------------------------------------- Phase 3 shell */
+
+/* Visible focus on every interactive element. The default outline is removed
+   by nothing here on purpose: keyboard users need to see where they are. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Hidden until focused, then the first thing a keyboard user reaches. */
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 50;
+  background: var(--navy); color: var(--surface); padding: 10px 16px; border-radius: 0 0 10px 10px;
+  transition: top .15s ease;
+}
+.skip-link:focus { top: 0; }
+
+.shell.narrow { width: min(720px, calc(100% - 32px)); }
+
+.page-header { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+.page-header .lead { font-size: 16px; margin: 6px 0 0; }
+.page-header h2 { margin: 6px 0 0; }
+
+.stack { display: grid; gap: 18px; align-content: start; }
+.two-col { display: grid; grid-template-columns: 1.4fr .9fr; gap: 18px; align-items: start; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.numeric { font-variant-numeric: tabular-nums; }
+
+.linklike { background: none; border: 0; padding: 0; color: var(--muted); cursor: pointer; text-decoration: underline; font-size: 14px; }
+.who { display: inline-flex; align-items: center; gap: 10px; }
+.who-name { font-weight: 700; color: var(--navy); font-size: 14px; }
+.locale-toggle { text-decoration: underline; }
+
+.callout { background: var(--callout-bg); border: 1px solid var(--callout-line); border-left-width: 4px; padding: 12px 14px; border-radius: 10px; color: var(--callout-ink); }
+
+/* ----------------------------------------------------------------- states */
+
+.state { text-align: center; padding: 42px 22px; border: 1px dashed var(--line); border-radius: 16px; background: var(--surface); }
+.state h3 { margin-bottom: 6px; }
+.state-error { border-style: solid; border-color: var(--error-line); background: var(--error-surface); color: var(--error-ink); }
+.state-error h3 { color: var(--error-ink); }
+
+.skeleton-group { display: grid; gap: 12px; }
+.skeleton { height: 58px; border-radius: 12px; background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-sheen) 37%, var(--skeleton-base) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+.skeleton-title { height: 34px; width: 40%; }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* ------------------------------------------------------------------ lists */
+
+.job-list, .offer-list, .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.job-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.job-row:hover { border-color: var(--green); }
+.job-row-main { display: grid; gap: 2px; }
+.job-row-meta { display: flex; align-items: center; gap: 12px; }
+.plain-list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.plain-list li:last-child { border-bottom: 0; }
+
+.definitions { display: grid; gap: 10px; margin: 0; }
+.definitions > div { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
+.definitions dt { color: var(--muted); font-size: 14px; }
+.definitions dd { margin: 0; }
+
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.timeline li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; align-items: start; }
+.timeline-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); margin-top: 6px; }
+.timeline strong { display: block; font-size: 14px; }
+
+.eligibility li { padding: 12px 0; }
+.eligibility-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.eligibility .reasons { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.is-eligible { background: var(--eligible-surface); border-radius: 10px; padding-inline: 10px; }
+
+.offer-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+
+/* ----------------------------------------------------------------- badges */
+/* Every tone pairs colour with its own text, so colour never carries meaning
+   alone. Contrast checked against white at 4.5:1 or better. */
+.badge.tone-neutral { background: var(--tone-neutral-bg); color: var(--tone-neutral-ink); }
+.badge.tone-info    { background: var(--tone-info-bg); color: var(--tone-info-ink); }
+.badge.tone-progress{ background: var(--tone-progress-bg); color: var(--tone-progress-ink); }
+.badge.tone-good    { background: var(--tone-good-bg); color: var(--tone-good-ink); }
+.badge.tone-bad     { background: var(--tone-bad-bg); color: var(--tone-bad-ink); }
+.badge.tone-muted   { background: var(--tone-muted-bg); color: var(--tone-muted-ink); }
+
+/* ------------------------------------------------------------------ forms */
+
+.accounts { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; }
+.account { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; cursor: pointer; font-weight: 500; }
+.account:has(input:checked) { border-color: var(--green); background: var(--eligible-surface); }
+.account span { display: grid; }
+.account .muted { font-weight: 400; font-size: 13px; }
+.account input { width: auto; }
+
+.checkbox { display: flex; flex-direction: row; align-items: center; gap: 10px; font-weight: 500; }
+.checkbox input { width: auto; }
+
+fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 8px; }
+legend { font-weight: 800; color: var(--navy); font-size: 14px; padding-inline: 6px; }
+
+.inline-form { gap: 12px; margin-top: 14px; }
+button[disabled] { opacity: .55; cursor: not-allowed; }
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--error); }
+
+/* -------------------------------------------------------------- responsive */
+
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: 1fr; }
+  .definitions > div { grid-template-columns: 1fr; gap: 2px; }
+}
+@media (max-width: 560px) {
+  .page-header { flex-direction: column; }
+  .job-row { flex-direction: column; align-items: flex-start; }
+  .job-row-meta { flex-wrap: wrap; }
+  .shell, .shell.narrow { width: calc(100% - 32px); }
+}
+
+/* ------------------------------------------------- provider availability */
+
+.availability { display: flex; align-items: center; gap: 9px; font-weight: 800; margin: 0; }
+.availability-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.availability.on { color: var(--green-strong); }
+.availability.on .availability-dot { background: var(--green); }
+.availability.off { color: var(--paused-ink); }
+.availability.off .availability-dot { background: var(--amber); }
+
+.proof-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.small-button { padding: 7px 12px; font-size: 13px; border-radius: 8px; }
+
+/* -------------------------------------------------------------- styleguide */
+
+/* A group heading inside a panel. h4, because the panel title is already the
+   h3 -- a second h3 inside it would flatten the outline a screen reader
+   announces into a list of siblings with no parent. */
+.swatch-group { color: var(--navy); font-size: 14px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; margin: 22px 0 0; }
+.swatch-group:first-of-type { margin-top: 14px; }
+.swatches { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.swatch { display: flex; align-items: center; gap: 12px; }
+.swatch-chip { width: 42px; height: 42px; border-radius: 10px; border: 1px solid var(--line); flex: none; }
+.swatch code { font-size: 13px; font-weight: 800; color: var(--navy); }
+.swatch-use { display: block; }
+.specimen { margin: 0; }
+
+/* ------------------------------------------------------------------ brand */
+
+/* The fleet photography. Always the whole van, never cropped through the
+   lockup on its flank, and always with a caption naming the livery -- the two
+   liveries are not interchangeable and the caption is how anyone reusing the
+   picture knows which one they took. */
+.livery { display: grid; gap: 10px; }
+.livery img { width: 100%; height: auto; border-radius: var(--radius-lg, 12px); border: 1px solid var(--line); display: block; }
+.livery figcaption { color: var(--muted); font-size: 13px; }
+.livery-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 0; }
+@media (max-width: 720px) { .livery-pair { grid-template-columns: 1fr; } }
+
+.logo-plate { display: flex; flex-wrap: wrap; align-items: center; gap: 28px; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.logo-plate.on-navy { background: var(--navy); border-color: var(--navy); }
+.logo-plate img { display: block; }
+.logo-lockup { height: 56px; width: auto; }
+.logo-mark { height: 56px; width: auto; }

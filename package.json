@@ -10,13 +10,23 @@
     "lint": "pnpm build:packages && pnpm -r lint",
     "typecheck": "pnpm build:packages && pnpm --filter @rescue/api typecheck && pnpm --filter @rescue/web typecheck",
     "test": "pnpm build:packages && pnpm -r test",
+    "e2e:install": "pnpm --filter @rescue/web exec playwright install chromium chromium-headless-shell",
+    "test:e2e": "pnpm --filter @rescue/web build && pnpm --filter @rescue/web test:e2e",
+    "test:db": "bash scripts/test-with-postgres.sh",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
+    "check:db": "bash scripts/check-database.sh",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",
-    "db:studio": "pnpm --filter @rescue/database studio"
+    "db:studio": "pnpm --filter @rescue/database studio",
+    "db:deploy": "pnpm --filter @rescue/database exec prisma migrate deploy"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22.13.0",
+    "pnpm": ">=11.19.0"
   }
 }

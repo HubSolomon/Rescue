@@ -1,2 +1,0 @@
-import { RequestForm } from "@/components/request-form";
-export default function RequestPage(){ return <main className="layout"><div className="shell"><div className="eyebrow">New recovery</div><h2>Tell us what happened</h2><p className="lead">Provide the operational facts. RESCUE will suggest the right vehicle, team and recovery route for human approval.</p><div className="panel"><RequestForm/></div></div></main>; }

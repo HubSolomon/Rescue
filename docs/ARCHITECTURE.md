@@ -37,10 +37,23 @@ stateDiagram-v2
   QUOTED --> ASSIGNED: eligible provider accepts
   ASSIGNED --> IN_PROGRESS: pickup begins
   IN_PROGRESS --> COMPLETED: evidence accepted
+  ASSIGNED --> QUOTED: provider fallback
+  IN_PROGRESS --> QUOTED: provider fallback
   DRAFT --> CANCELLED
+  TRIAGED --> CANCELLED
   QUOTED --> CANCELLED
-  ASSIGNED --> TRIAGED: provider fallback
+  ASSIGNED --> CANCELLED
 ```
+
+Fallback returns a job to `QUOTED`, not `TRIAGED`. The customer has already
+approved a price; the job needs a different provider, not a new quote. `QUOTED`
+is also the only state from which `ASSIGNED` is reachable, which is what
+guarantees no job is dispatched without an approved price. This changed during
+Phase 2 -- see `docs/adr/0001-fallback-returns-to-quoted.md` for why.
+
+`JOB_TRANSITIONS` in `packages/contracts/src/job.ts` is the authoritative
+version of this diagram. The API rejects anything not listed there with
+`INVALID_STATE_TRANSITION`.
 
 ## Trust boundaries
 

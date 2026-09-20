@@ -2,15 +2,41 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Working branches too, not only main. CI that runs solely on a pull
+    # request is CI that has not run yet -- the store conformance suite sat
+    # unexecuted for two phases waiting for a button to be pressed. The
+    # concurrency rule below means a branch pushed repeatedly still occupies
+    # one runner, so this costs a superseded run, not a queue.
+    branches: [main, "claude/**", "feat/**", "fix/**"]
+
+# Read-only by default. A job that needs more asks for it, and none do.
 permissions:
   contents: read
+
+# A new push supersedes the run in flight. Without this, a branch pushed three
+# times in a minute occupies three runners proving two things nobody will read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Playwright and Prisma both download into the home directory. Naming the
+  # path here is what makes the cache keys below possible.
+  PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+
 jobs:
+  # ---------------------------------------------------------------- unit
   verify:
+    name: Typecheck, lint, unit tests, build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The checkout token is left in .git/config otherwise, where any
+          # later step -- including one from a dependency's lifecycle script --
+          # can read it.
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with: { version: 11.19.0 }
       - uses: actions/setup-node@v4
@@ -20,5 +46,116 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:generate
       - run: pnpm typecheck
+      - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  # ------------------------------------------------------------- database
+  database:
+    name: Store conformance against PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 16, not 17: the version every migration here has been executed against.
+    # Moving is a deployment decision with a re-verification attached.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rescue_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # The suite refuses a URL that does not look like a scratch database.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rescue_test
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm --filter @rescue/database exec prisma migrate deploy
+      - name: Provoke every constraint and trigger
+        # Before the application suite. These are the rules PostgreSQL enforces
+        # regardless of which code reached it -- a migration, a support query,
+        # a second service. If they are missing, a green application suite is
+        # measuring the wrong layer.
+        run: pnpm check:db
+      # The whole point of this job: the Prisma store is the half of the
+      # conformance suite that skips itself everywhere else, so without this it
+      # is the half that is never run.
+      - run: pnpm --filter @rescue/api test
+
+  # ------------------------------------------------------------------ e2e
+  e2e:
+    name: Browser journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          # Keyed on the lockfile, so a Playwright upgrade misses the cache and
+          # downloads the matching build rather than reusing the wrong one.
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @rescue/web exec playwright install --with-deps chromium chromium-headless-shell
+      - run: pnpm test:e2e
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7
+
+  # --------------------------------------------------------- supply chain
+  supply-chain:
+    name: Secrets and dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scanner needs the working tree, not the history: a secret in an
+          # old commit is already published and must be rotated, not scanned
+          # for. Shallow on purpose.
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with: { version: 11.19.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Scan for committed secrets
+        # No install first: the scanner has no dependencies, and running it
+        # before `pnpm install` means a malicious postinstall script has not
+        # yet had a chance to run in this job.
+        run: node scripts/scan-secrets.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: Lockfile is current
+        # --frozen-lockfile above already fails on drift; this names it.
+        run: git diff --exit-code pnpm-lock.yaml
+      - name: Dependency audit
+        run: pnpm audit --audit-level=high
