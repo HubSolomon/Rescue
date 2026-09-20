@@ -1,0 +1,67 @@
+# Alertmanager routing.
+#
+# Deliberately minimal and deliberately incomplete: this file decides *who* is
+# told, and that is an organisational decision rather than an engineering one.
+# What is here is the shape and the reasoning; the receivers are placeholders
+# and must be filled in before anyone relies on them.
+#
+# The one thing that is not a placeholder is the routing rule. `page` and
+# `warn` must not go to the same place. A warning that arrives the same way as
+# a page trains people to ignore pages, and that happens within about a week.
+
+route:
+  receiver: warn-channel
+  # Group by alert and component, so five dead letters are one notification
+  # rather than five.
+  group_by: [alertname, component]
+  # Thirty seconds before the first send: enough for a related alert to join
+  # the group, short enough that nobody is waiting.
+  group_wait: 30s
+  group_interval: 5m
+  # Four hours before repeating an alert nobody has acted on. Shorter becomes
+  # noise; longer lets an overnight problem go quiet.
+  repeat_interval: 4h
+
+  routes:
+    - matchers: [severity = "page"]
+      receiver: page-oncall
+      # Pages repeat sooner. Something that wakes a person should keep asking
+      # until it is acknowledged or resolved.
+      repeat_interval: 1h
+
+inhibit_rules:
+  # If the API is down, its error rate and latency are consequences. Sending
+  # three pages for one outage is how a real signal gets lost in its own echo.
+  - source_matchers: [alertname = "ApiDown"]
+    target_matchers: [alertname =~ "ApiErrorRate|ApiLatency"]
+    equal: [service]
+  # Likewise: a stopped sweep explains a failing one.
+  - source_matchers: [alertname = "DispatchSweepStopped"]
+    target_matchers: [alertname = "DispatchSweepFailing"]
+    equal: [service]
+
+receivers:
+  # ---------------------------------------------------------- PLACEHOLDERS
+  # Both of these are inert. An Alertmanager with no receiver configured
+  # accepts every alert and delivers none, silently -- which is the worst
+  # possible state, because the dashboard shows the rules are loaded. Fill
+  # these in, then send a test alert and confirm it arrives:
+  #
+  #   amtool alert add alertname=Test severity=page --alertmanager.url=http://localhost:9093
+  #
+  - name: page-oncall
+    # webhook_configs:
+    #   - url: https://events.pagerduty.com/integration/<key>/enqueue
+    webhook_configs:
+      - url: http://localhost:9093/-/no-receiver-configured
+        send_resolved: true
+
+  - name: warn-channel
+    # slack_configs:
+    #   - api_url: <webhook>
+    #     channel: "#rescue-alerts"
+    #     title: '{{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.action }}'
+    webhook_configs:
+      - url: http://localhost:9093/-/no-receiver-configured
+        send_resolved: true

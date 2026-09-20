@@ -74,6 +74,13 @@ const baseSchema = z.object({
   S3_BUCKET: z.string().min(1).default("rescue-dev"),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
+  /** Required by SigV4. Any value for a gateway that ignores it; MinIO uses us-east-1. */
+  S3_REGION: z.string().min(1).default("eu-central-1"),
+  /**
+   * `path` for MinIO and most self-hosted gateways, `virtual-host` for AWS.
+   * Unset, the adapter infers it: an endpoint means self-hosted means path.
+   */
+  S3_ADDRESSING: z.enum(["path", "virtual-host"]).optional(),
   EVIDENCE_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
 
   /**
@@ -97,6 +104,28 @@ const baseSchema = z.object({
    * and whether their traffic is getting 4xx or 5xx.
    */
   METRICS_TOKEN: z.string().min(16).optional(),
+
+  /**
+   * Shared secret for the demo deployment's gate. See
+   * `src/plugins/demo-gate.ts` -- when set, every request but `/v1/health`
+   * must carry it in `x-demo-key`, which is how a publicly reachable API can
+   * run with the development sign-in enabled without that being an open door.
+   *
+   * Unset in every real deployment. It is a second requirement, never a second
+   * way in: the hook can only reject.
+   */
+  DEMO_API_KEY: z.string().min(24).optional(),
+
+  /**
+   * Port the worker serves `/metrics` and `/health` on.
+   *
+   * The worker is a separate process and holds counters the API does not --
+   * the dispatch sweep and the retention job run only here. Without a
+   * listener those series never reach a scraper, and every alert about
+   * dispatch or retention sits permanently pending, which reads as healthy.
+   * 0 disables the listener for a deployment that collects another way.
+   */
+  WORKER_METRICS_PORT: z.coerce.number().int().min(0).max(65_535).default(4_001),
 
   /**
    * Retention, in days, per category. These are defaults chosen to be
@@ -159,6 +188,25 @@ const configSchema = baseSchema
       }
       if (value.WEB_ORIGIN === "*") {
         ctx.addIssue({ code: "custom", path: ["WEB_ORIGIN"], message: "WEB_ORIGIN may not be a wildcard" });
+      }
+    }
+
+    /**
+     * Selecting s3 without credentials used to be accepted, and the app then
+     * built the mock signer anyway -- so a production deployment passed this
+     * check, booted, and issued upload URLs for a bucket that did not exist.
+     * A missing credential is now a refusal to start, in every environment,
+     * because the alternative is a service that looks configured and is not.
+     */
+    if (value.STORAGE_PROVIDER === "s3") {
+      for (const field of ["S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
+        if (!value[field]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: `STORAGE_PROVIDER=s3 requires ${field}`
+          });
+        }
       }
     }
 

@@ -15,6 +15,7 @@
     "test:db": "bash scripts/test-with-postgres.sh",
     "scan:secrets": "node scripts/scan-secrets.mjs",
     "check:db": "bash scripts/check-database.sh",
+    "check:deploy": "node scripts/check-deploy-env.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @rescue/database generate",
     "db:migrate": "pnpm --filter @rescue/database migrate",

@@ -122,11 +122,23 @@ exact after restore.
 
 Ranked by what would hurt first.
 
-**1. Nothing alerts.** Every metric added this phase has to be looked at by
-someone who already suspects a problem. There is no Prometheus scraping
-`/metrics`, no rule, no page. The gap between "the system can tell you" and
-"the system tells you" is the whole difference between a pilot and an
-operation.
+**1. ~~Nothing alerts~~ — nothing is *delivered*.** Closed in part: eleven
+alert rules now exist in `deploy/prometheus/`, with a scrape config, compose
+wiring under an `observability` profile, and a test that holds every rule to
+the metrics the code exports so a rename fails the build instead of silently
+matching nothing.
+
+Writing them found a hole in Phase 5. The dispatch sweep and the retention job
+run **only in the worker**, and the worker never listened — so those counters
+reached no scraper and every alert about dispatch or retention would have sat
+permanently pending, which on a dashboard is indistinguishable from healthy.
+The worker now serves `/metrics` and `/health` on `WORKER_METRICS_PORT`.
+
+What remains is the last mile: **the Alertmanager receivers are
+placeholders.** An Alertmanager with no receiver accepts every alert and drops
+it silently, which is the worst state to be in because the rules show as
+loaded. Until a test alert has reached somebody's phone, this is a
+well-reasoned configuration file and not monitoring.
 
 **2. No backup is scheduled.** The procedure is proven and nothing runs it. No
 nightly dump, no WAL archiving, no offsite copy, and no calendar entry for the

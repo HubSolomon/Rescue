@@ -1,0 +1,55 @@
+# Prometheus, scraping RESCUE.
+#
+# Two targets, not one. The API and the worker are separate processes and they
+# export different things: the API has the HTTP series, the worker has the
+# sweep and retention counters. Scraping only the API -- the obvious mistake,
+# because it is the one with a URL people know -- leaves every alert about
+# dispatch and retention permanently pending, which reads as healthy.
+#
+# The queue-depth gauges appear on both, because both read them from the same
+# database at scrape time. That is deliberate: the number is a property of the
+# queue, not of the process, so either answer is correct and neither goes stale
+# when a process restarts.
+
+global:
+  scrape_interval: 30s
+  # Below the 30s scrape interval, so a single slow scrape does not silently
+  # become a gap in the series.
+  scrape_timeout: 10s
+  external_labels:
+    environment: "${RESCUE_ENV}"
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: rescue-api
+    metrics_path: /metrics
+    # The endpoint is not public. Without a token it does not exist in
+    # production at all; with one it demands it, compared in constant time.
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics-token
+    static_configs:
+      - targets: ["api:4000"]
+        labels: { component: api }
+
+  - job_name: rescue-worker
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics-token
+    static_configs:
+      - targets: ["worker:4001"]
+        labels: { component: worker }
+
+  # Prometheus watching itself. Without this, "no alerts fired last night"
+  # has two readings and no way to tell them apart.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

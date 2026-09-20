@@ -11,7 +11,45 @@ import { readSessionToken } from "./session";
  * stored response instead of creating a second job.
  */
 
-const API_URL = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000";
+/**
+ * Accepts a bare hostname as well as a URL.
+ *
+ * Several hosts expose a sibling service as a hostname with no scheme --
+ * Render's `fromService: property: host` is one -- and the resulting
+ * `fetch("rescue-api.example/v1/jobs")` fails with a message about an invalid
+ * URL that names neither the variable nor the missing four characters. A
+ * localhost-shaped value keeps http; anything else gets https, because a
+ * deployed API reached over plain http would put the session token on the
+ * wire in clear.
+ */
+function normaliseApiUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/$/, "");
+  if (/^https?:\/\//.test(trimmed)) return trimmed;
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(trimmed);
+  return `${local ? "http" : "https"}://${trimmed}`;
+}
+
+const API_URL = normaliseApiUrl(
+  process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:4000"
+);
+
+/**
+ * Shared secret for the demo deployment's API gate.
+ *
+ * Read from `process.env` rather than `NEXT_PUBLIC_*` on purpose: that prefix
+ * is what inlines a value into the browser bundle, and this one must never
+ * leave the server. It can be read here safely because this module is
+ * `server-only` -- every call in this file runs in the Next server process.
+ *
+ * Unset outside the demo, where the API has no gate to satisfy.
+ */
+const DEMO_API_KEY = process.env.DEMO_API_KEY;
+
+/** Applied to every outbound request, so no call site has to remember it. */
+function withDemoKey(headers: Record<string, string>): Record<string, string> {
+  if (DEMO_API_KEY) headers["x-demo-key"] = DEMO_API_KEY;
+  return headers;
+}
 
 /** Error codes the API documents. Mapped to localised copy in `i18n`. */
 export class ApiError extends Error {
@@ -60,7 +98,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   try {
     response = await fetch(`${API_URL}${path}`, {
       method,
-      headers,
+      headers: withDemoKey(headers),
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: "no-store",
       ...(options.revalidate !== undefined && options.revalidate !== false
@@ -110,7 +148,7 @@ export async function getWithMeta<T>(
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
+      headers: withDemoKey({ authorization: `Bearer ${token}` }),
       cache: "no-store"
     });
   } catch {
