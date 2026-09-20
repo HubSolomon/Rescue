@@ -1,5 +1,20 @@
+// `output` is explicit, and it is load-bearing for the container build.
+//
+// Without it, prisma-client-js writes the generated client next to wherever
+// `@prisma/client` resolved -- which under pnpm is
+// `node_modules/.pnpm/@prisma+client@<version>_<peer hash>/node_modules/.prisma`.
+// That directory name embeds the resolved version and a hash of its peer
+// dependencies, so it is not a path a Dockerfile can name, and `pnpm deploy`
+// rebuilds it from the store without the generated output. The pruned tree then
+// contains the placeholder client, whose every export throws "did not
+// initialize yet" on the first query -- at runtime, in the container.
+//
+// Generated into the package instead, it is an ordinary directory that the
+// deploy copies along with `dist` and `prisma`, listed in `files` so no ignore
+// rule can drop it. Verified by pruning and checking the byte sizes.
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/client"
 }
 
 datasource db {

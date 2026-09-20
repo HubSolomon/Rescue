@@ -7,6 +7,11 @@ node_modules
 **/.next
 dist
 **/dist
+# The generated Prisma client. The build stage runs `prisma generate` itself,
+# and a copy generated on the host carries that host's query engine -- a
+# darwin-arm64 binary reaching a linux image is a failure at the first query,
+# with a message about a missing shared library rather than about this.
+packages/database/generated
 .git
 .github
 test-results

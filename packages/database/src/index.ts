@@ -1,6 +1,14 @@
-import { PrismaClient } from "@prisma/client";
+// The generated client, not the `@prisma/client` package.
+//
+// `prisma generate` writes to `../generated/client` (see schema.prisma for why
+// that is explicit). `@prisma/client` re-exports whatever the generator last
+// wrote to its default location, which under pnpm is a path no build can name;
+// importing the output directly is the same code with a path that survives
+// `pnpm deploy`. This is the only file in the repository that names it, so the
+// rest of the codebase keeps importing `@rescue/database`.
+import { PrismaClient } from "../generated/client/index.js";
 
-export * from "@prisma/client";
+export * from "../generated/client/index.js";
 export { PrismaClient };
 
 /**

@@ -64,18 +64,21 @@ ENV API_HOST=0.0.0.0
 ENV API_PORT=4000
 ENV WORKER_METRICS_PORT=4001
 
-COPY --from=build --chown=node:node /pruned ./
-# The generated Prisma client and the schema.
+# One copy. The pruned tree is complete, including the generated Prisma client.
 #
-# UNVERIFIED, and the one line in this file to watch on the first build. The
-# container this was written in cannot reach binaries.prisma.sh, so
-# `prisma generate` has never run here and the layout of the generated client
-# inside an injected pnpm deploy could not be confirmed. If the API starts and
-# then throws "Cannot find module '.prisma/client'", this path is why: find
-# where `prisma generate` actually wrote it in the build stage and copy from
-# there. Everything else in this file was executed.
-COPY --from=build --chown=node:node /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build --chown=node:node /app/packages/database/prisma ./packages/database/prisma
+# It did not used to be. This file previously carried two further COPY lines
+# that pulled `/app/node_modules/.prisma` and the schema in separately, and
+# both were wrong: under pnpm the default generator output lands in
+# `node_modules/.pnpm/@prisma+client@<version>_<peer hash>/node_modules/.prisma`,
+# so `/app/node_modules/.prisma` does not exist and the build fails on the COPY
+# -- and had it existed, `pnpm deploy` had already written a placeholder client
+# into the pruned tree at the path the runtime actually resolves, so the image
+# would have started and thrown "did not initialize yet" on the first query.
+#
+# The fix is in `packages/database/prisma/schema.prisma`: an explicit generator
+# `output` inside the package, which the deploy carries like any other file.
+# Verified by pruning and loading `@rescue/database` out of the result.
+COPY --from=build --chown=node:node /pruned ./
 
 # node, not root. The image installs nothing at runtime and writes nothing to
 # disk, so there is no reason for it to be able to.

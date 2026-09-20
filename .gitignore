@@ -12,6 +12,12 @@ coverage
 *.tsbuildinfo
 .DS_Store
 packages/database/prisma/dev.db
+
+# The generated Prisma client. A build artefact of `prisma generate`, which
+# runs as the database package's `prebuild`, so it is always present before
+# anything imports it. `files` in that package.json re-includes it for the
+# deploy, which is the one place this ignore rule would do damage.
+packages/database/generated
 test-results
 playwright-report
 blob-report
