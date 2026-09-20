@@ -8,7 +8,7 @@ import { systemClock, type Clock } from "./lib/clock.js";
 import { AppError } from "./lib/errors.js";
 import { type TriageService } from "./lib/triage.js";
 import { StubTriageModel, ValidatingTriageService } from "./lib/ai.js";
-import { MockEvidenceStorage, type EvidenceStorage } from "./lib/storage.js";
+import { MockEvidenceStorage, S3EvidenceStorage, type EvidenceStorage } from "./lib/storage.js";
 import { DispatchSweep, type SweepConfig } from "./lib/dispatch.js";
 import {
   CachingMaps,
@@ -183,14 +183,34 @@ export async function buildApp(options: BuildAppOptions = {}) {
     }
   );
   const sweep = new DispatchSweep({ store, clock, maps, config: options.sweep });
+  /**
+   * Evidence storage, chosen by configuration rather than assumed.
+   *
+   * This used to build the mock unconditionally while `parseConfig` refused
+   * `STORAGE_PROVIDER=mock` in production -- so a production deployment set
+   * `s3`, passed validation, booted, and then signed upload URLs against a
+   * bucket nothing was serving. The config check made it look configured. A
+   * service that fails to start is recoverable in a minute; one that accepts
+   * photographs and drops them is not discovered until somebody needs one.
+   */
   const storage =
     options.storage ??
-    new MockEvidenceStorage(
-      config.S3_ENDPOINT ?? "http://localhost:9000",
-      config.S3_BUCKET,
-      config.JWT_SECRET,
-      config.EVIDENCE_UPLOAD_TTL_SECONDS
-    );
+    (config.STORAGE_PROVIDER === "s3"
+      ? new S3EvidenceStorage({
+          bucket: config.S3_BUCKET,
+          region: config.S3_REGION,
+          accessKeyId: config.S3_ACCESS_KEY!,
+          secretAccessKey: config.S3_SECRET_KEY!,
+          endpoint: config.S3_ENDPOINT,
+          addressing: config.S3_ADDRESSING,
+          ttlSeconds: config.EVIDENCE_UPLOAD_TTL_SECONDS
+        })
+      : new MockEvidenceStorage(
+          config.S3_ENDPOINT ?? "http://localhost:9000",
+          config.S3_BUCKET,
+          config.JWT_SECRET,
+          config.EVIDENCE_UPLOAD_TTL_SECONDS
+        ));
   const verifier = options.verifier ?? buildVerifier(config);
   const hops = config.TRUST_PROXY_HOPS;
 

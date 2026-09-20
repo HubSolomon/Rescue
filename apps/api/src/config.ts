@@ -74,6 +74,13 @@ const baseSchema = z.object({
   S3_BUCKET: z.string().min(1).default("rescue-dev"),
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
+  /** Required by SigV4. Any value for a gateway that ignores it; MinIO uses us-east-1. */
+  S3_REGION: z.string().min(1).default("eu-central-1"),
+  /**
+   * `path` for MinIO and most self-hosted gateways, `virtual-host` for AWS.
+   * Unset, the adapter infers it: an endpoint means self-hosted means path.
+   */
+  S3_ADDRESSING: z.enum(["path", "virtual-host"]).optional(),
   EVIDENCE_UPLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
 
   /**
@@ -170,6 +177,25 @@ const configSchema = baseSchema
       }
       if (value.WEB_ORIGIN === "*") {
         ctx.addIssue({ code: "custom", path: ["WEB_ORIGIN"], message: "WEB_ORIGIN may not be a wildcard" });
+      }
+    }
+
+    /**
+     * Selecting s3 without credentials used to be accepted, and the app then
+     * built the mock signer anyway -- so a production deployment passed this
+     * check, booted, and issued upload URLs for a bucket that did not exist.
+     * A missing credential is now a refusal to start, in every environment,
+     * because the alternative is a service that looks configured and is not.
+     */
+    if (value.STORAGE_PROVIDER === "s3") {
+      for (const field of ["S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
+        if (!value[field]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [field],
+            message: `STORAGE_PROVIDER=s3 requires ${field}`
+          });
+        }
       }
     }
 

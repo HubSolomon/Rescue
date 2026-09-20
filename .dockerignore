@@ -1,0 +1,25 @@
+# Everything the build does not need, which is most of it. A fat context is
+# slow to send and, worse, makes a stale node_modules or .next reachable from
+# inside the build.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.git
+.github
+test-results
+**/test-results
+playwright-report
+**/playwright-report
+coverage
+**/coverage
+.env
+.env.*
+!.env.example
+*.bundle
+*.log
+docs
+.claude
+deploy/prometheus/metrics-token

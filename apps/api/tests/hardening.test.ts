@@ -15,7 +15,17 @@ const PRODUCTION_ENV = {
   OIDC_JWKS_URI: "https://idp.example.com/.well-known/jwks.json",
   REGISTRATION_HASH_KEY: "a-production-registration-key-long-enough",
   DATABASE_URL: "postgresql://rescue@db:5432/rescue",
-  STORAGE_PROVIDER: "s3"
+  STORAGE_PROVIDER: "s3",
+  // The credentials are part of a *complete* production environment. This
+  // fixture used to omit them and still pass, because the config accepted
+  // STORAGE_PROVIDER=s3 on its own while the app built the mock signer
+  // anyway -- so the suite's idea of "fully configured" was a deployment
+  // that would have signed uploads for a bucket nothing was serving.
+  S3_BUCKET: "rescue-evidence",
+  // pragma: allowlist secret
+  S3_ACCESS_KEY: "AKIAIOSFODNN7EXAMPLE",
+  // pragma: allowlist secret
+  S3_SECRET_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 } as const;
 
 describe("secrets (H3)", () => {
@@ -57,7 +67,9 @@ describe("production refuses to boot half-configured", () => {
     ["OIDC_ISSUER", /identity provider/i],
     ["REGISTRATION_HASH_KEY", /REGISTRATION_HASH_KEY/],
     ["DATABASE_URL", /DATABASE_URL/],
-    ["STORAGE_PROVIDER", /does not store anything/]
+    ["STORAGE_PROVIDER", /does not store anything/],
+    ["S3_ACCESS_KEY", /requires S3_ACCESS_KEY/],
+    ["S3_SECRET_KEY", /requires S3_SECRET_KEY/]
   ])("refuses production without %s", (field, message) => {
     const env: Record<string, string> = { ...PRODUCTION_ENV };
     delete env[field];

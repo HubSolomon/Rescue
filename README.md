@@ -11,7 +11,8 @@ AI-assisted B2B exception logistics for failed bulky deliveries, returns and reu
 - `docs/ARCHITECTURE.md`: system architecture and trust boundaries
 - `docs/adr/`: architecture decision records
 - `docs/audits/`: security audits, phase reports and the data inventory
-- `docs/runbooks/`: backup and restore, incident response
+- `docs/runbooks/`: deployment, backup and restore, incident response
+- `deploy/`: Dockerfiles, the production environment contract, Prometheus rules
 
 ## Local setup
 
@@ -152,6 +153,20 @@ Enforced in code:
   one. `apps/api/src/lib/redaction.ts` lists every path.
 - Retention runs daily and erasure severs a person from the records the law
   requires RESCUE to keep. `docs/audits/DATA_INVENTORY.md`.
+
+## Deploying
+
+Three containers and a migration job, on any host that runs OCI images.
+`docs/runbooks/DEPLOYMENT.md` is the procedure; `deploy/.env.production.example`
+is the environment contract. Check it before you build anything:
+
+```bash
+node scripts/check-deploy-env.mjs .env.production
+```
+
+Two things that bite: `NEXT_PUBLIC_API_URL` is baked into the web image at
+**build** time, and `REGISTRATION_HASH_KEY` cannot be rotated — a new value
+makes every stored vehicle-registration hash permanently unmatchable.
 
 ## GitHub
 
