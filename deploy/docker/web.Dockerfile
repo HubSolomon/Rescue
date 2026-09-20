@@ -44,8 +44,13 @@ COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
 USER node
 EXPOSE 3000
 
+# /healthz, not /de. A page render is a check of the API as much as of this
+# process -- it fetches jobs -- so an API outage would mark a working web
+# container unhealthy and have the orchestrator restart it in a loop. /healthz
+# answers only whether this process is serving, and is exempt from the demo
+# gate, which would otherwise 401 the probe.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/de').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Standalone emits a server.js at the traced workspace root.
 CMD ["node", "apps/web/server.js"]

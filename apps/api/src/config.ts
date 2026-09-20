@@ -106,6 +106,17 @@ const baseSchema = z.object({
   METRICS_TOKEN: z.string().min(16).optional(),
 
   /**
+   * Shared secret for the demo deployment's gate. See
+   * `src/plugins/demo-gate.ts` -- when set, every request but `/v1/health`
+   * must carry it in `x-demo-key`, which is how a publicly reachable API can
+   * run with the development sign-in enabled without that being an open door.
+   *
+   * Unset in every real deployment. It is a second requirement, never a second
+   * way in: the hook can only reject.
+   */
+  DEMO_API_KEY: z.string().min(24).optional(),
+
+  /**
    * Port the worker serves `/metrics` and `/health` on.
    *
    * The worker is a separate process and holds counters the API does not --

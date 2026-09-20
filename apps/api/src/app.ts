@@ -31,6 +31,7 @@ import {
   type TokenVerifier
 } from "./lib/auth/verifier.js";
 import { authPlugin } from "./plugins/auth.js";
+import { demoGate } from "./plugins/demo-gate.js";
 import { createIdempotencyRunner } from "./plugins/idempotency.js";
 import { buildOpenApiDocument } from "./openapi.js";
 import { createMetrics, type AppMetrics } from "./lib/metrics.js";
@@ -272,6 +273,15 @@ export async function buildApp(options: BuildAppOptions = {}) {
     max: options.rateLimitMax ?? config.RATE_LIMIT_MAX,
     timeWindow: "1 minute"
   });
+
+  /**
+   * Before every route, including `/metrics` and the development sign-in.
+   *
+   * Fastify builds a route's hook chain when the route is registered, so a
+   * hook added later does not apply to it. This must therefore come before the
+   * first `register` that adds a route, not merely before the auth plugin.
+   */
+  await app.register(demoGate, { key: config.DEMO_API_KEY });
 
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);
