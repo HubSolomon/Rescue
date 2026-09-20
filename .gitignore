@@ -2,8 +2,12 @@ node_modules
 .next
 dist
 coverage
+# Every .env variant, not just two. `.env.production` holds an OIDC secret,
+# a bucket credential and two keys that cannot be rotated -- and it was not
+# covered until someone created one and noticed.
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 *.tsbuildinfo
 .DS_Store
